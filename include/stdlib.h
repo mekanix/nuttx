@@ -188,11 +188,15 @@ long      strtol(FAR const char *nptr, FAR char **endptr, int base);
 unsigned long strtoul(FAR const char *nptr, FAR char **endptr, int base);
 #ifdef CONFIG_HAVE_LONG_LONG
 long long strtoll(FAR const char *nptr, FAR char **endptr, int base);
+long long strtoll_l(FAR const char *nptr, char **endptr, int base,
+                    locale_t loc);
 unsigned long long strtoull(FAR const char *nptr, FAR char **endptr,
                             int base);
-long long strtoll_l(FAR const char *nptr, char **endptr, int base, locale_t loc);
+unsigned long long strtoull_l(FAR const char *nptr, FAR char **endptr,
+                              int base, locale_t loc);
 #endif
 float     strtof(FAR const char *str, FAR char **endptr);
+float     strtof_l(FAR const char *str, FAR char **endptr, locale_t loc);
 #ifdef CONFIG_HAVE_DOUBLE
 double    strtod(FAR const char *str, FAR char **endptr);
 #endif
