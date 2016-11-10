@@ -180,6 +180,8 @@ int               mbsinit(FAR const mbstate_t *);
 size_t            mbrlen(FAR const char *, size_t, FAR mbstate_t *);
 size_t            mbrtowc(wchar_t *, FAR const char *, size_t,
                       mbstate_t *);
+size_t            mbsnrtowcs(FAR wchar_t *, FAR const char **, size_t,
+                      size_t, mbstate_t *);
 size_t            mbsrtowcs(wchar_t *, FAR const char **, size_t,
                       mbstate_t *);
 wint_t            putwc(wchar_t, FILE *);
@@ -208,6 +210,7 @@ size_t            wcslcat(FAR wchar_t *, FAR const wchar_t *, size_t);
 FAR wchar_t      *wcsncat(FAR wchar_t *, FAR const wchar_t *, size_t);
 int               wcsncmp(FAR const wchar_t *, FAR const wchar_t *, size_t);
 FAR wchar_t      *wcsncpy(FAR wchar_t *, FAR const wchar_t *, size_t);
+size_t            wcsnrtombs(FAR char *, FAR const wchar_t **, size_t, size_t, mbstate_t *);
 FAR wchar_t      *wcspbrk(FAR const wchar_t *, FAR const wchar_t *);
 FAR wchar_t      *wcsrchr(FAR const wchar_t *, wchar_t);
 size_t            wcsrtombs(FAR char *, FAR const wchar_t **, size_t,
