@@ -45,7 +45,6 @@
 
 #include <sys/types.h>
 #include <stdint.h>
-#include <locale.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -126,6 +125,10 @@ struct lldiv_s
 };
 
 typedef struct lldiv_s lldiv_t;
+
+/* locale_t type */
+
+typedef void* locale_t;
 
 /****************************************************************************
  * Public Function Prototypes
