@@ -42,6 +42,7 @@
 
 #include <nuttx/config.h>
 #include <nuttx/compiler.h>
+#include <stdlib.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -87,6 +88,14 @@ void init_locale()
 {
   return;
 }
+
+#ifdef __cplusplus
+static inline
+void freelocale(locale_t locobj)
+{
+  delete locobj;
+}
+#endif
 
 static inline
 locale_t uselocale(locale_t newloc)
