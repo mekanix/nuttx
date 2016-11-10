@@ -45,6 +45,7 @@
 
 #include <sys/types.h>
 #include <stdint.h>
+#include <locale.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -189,6 +190,7 @@ unsigned long strtoul(FAR const char *nptr, FAR char **endptr, int base);
 long long strtoll(FAR const char *nptr, FAR char **endptr, int base);
 unsigned long long strtoull(FAR const char *nptr, FAR char **endptr,
                             int base);
+long long strtoll_l(FAR const char *nptr, char **endptr, int base, locale_t loc);
 #endif
 float     strtof(FAR const char *str, FAR char **endptr);
 #ifdef CONFIG_HAVE_DOUBLE
