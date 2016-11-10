@@ -55,6 +55,31 @@
 #define LC_TIME     5
 #define LC_MESSAGES 6
 
+#define LC_COLLATE_MASK			(1 << 0)
+#define LC_CTYPE_MASK			(1 << 1)
+#define LC_MESSAGES_MASK		(1 << 2)
+#define LC_MONETARY_MASK		(1 << 3)
+#define LC_NUMERIC_MASK			(1 << 4)
+#define LC_TIME_MASK			(1 << 5)
+#define LC_ALL_MASK			(  LC_COLLATE_MASK \
+					 | LC_CTYPE_MASK \
+					 | LC_MESSAGES_MASK \
+					 | LC_MONETARY_MASK \
+					 | LC_NUMERIC_MASK \
+					 | LC_TIME_MASK )
+
+#define _LC_LAST_MASK			(1 << (6 - 1))
+
+#define LC_GLOBAL_LOCALE		((locale_t)-1)
+
+#ifdef MB_CUR_MAX
+#undef MB_CUR_MAX
+#define MB_CUR_MAX			(___mb_cur_max())
+#ifndef MB_CUR_MAX_L
+#define MB_CUR_MAX_L(x)			(___mb_cur_max_l(x))
+#endif /* !MB_CUR_MAX_L */
+#endif /* MB_CUR_MAX */
+
 /****************************************************************************
  * Public Type Definitions
  ****************************************************************************/
