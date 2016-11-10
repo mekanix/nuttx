@@ -1,10 +1,6 @@
 /****************************************************************************
- * libc/stdlib/lib_strtof_l.c
- * Convert string to float
- *
- *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
- *
- * A pretty straight forward conversion fo strtod():
+ * libc/stdlib/lib_strtod_l.c
+ * Convert string to double
  *
  *   Copyright (C) 2002 Michael Ringgaard. All rights reserved.
  *   Copyright (C) 2006-2007 H. Peter Anvin.
@@ -48,6 +44,8 @@
 #include <ctype.h>
 #include <errno.h>
 
+#ifdef CONFIG_HAVE_DOUBLE
+
 /****************************************************************************
  * Pre-processor definitions
  ****************************************************************************/
@@ -61,14 +59,16 @@
  ****************************************************************************/
 
 /***************************************************(************************
- * Name: strtof_l
+ * Name: strtod
  *
  * Description:
- *   Convert a string to a float value
+ *   Convert a string to a double value
  *
  ****************************************************************************/
 
-float strtof_l(FAR const char *str, FAR char **endptr, locale_t loc)
+double strtod_l(FAR const char *str, FAR char **endptr, locale_t loc)
 {
-  return strtof(str, endptr);
+  return strtod(str, endptr);
 }
+
+#endif /* CONFIG_HAVE_DOUBLE */
