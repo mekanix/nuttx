@@ -201,6 +201,7 @@ float     strtof_l(FAR const char *str, FAR char **endptr, locale_t loc);
 double    strtod(FAR const char *str, FAR char **endptr);
 double    strtod_l(FAR const char *str, FAR char **endptr, locale_t loc);
 long double strtold(FAR const char *str, FAR char **endptr);
+long double strtold_l(FAR const char *str, FAR char **endptr, locale_t loc);
 #endif
 
 #define atoi(nptr)  ((int)strtol((nptr), NULL, 10))

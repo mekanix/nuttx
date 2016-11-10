@@ -172,6 +172,8 @@
 "strtok","string.h","","FAR char","FAR char *","FAR const char *"
 "strtok_r","string.h","","FAR char","FAR char *","FAR const char *","FAR char **"
 "strtol","string.h","","long","FAR const char *","FAR char **","int"
+"strtold","stdlib.h","","long double","FAR const char *str","FAR char **endptr"
+"strtold_l","stdlib.h","","long double","FAR const char *str","FAR char **endptr", "locale_t loc"
 "strtoll","stdlib.h","defined(CONFIG_HAVE_LONG_LONG)","long long","FAR const char *nptr","FAR char **endptr","int base"
 "strtoll_l","stdlib.h","defined(CONFIG_HAVE_LONG_LONG)","long long","FAR const char *nptr","FAR char **endptr","int base","locale_t" 
 "strtoul","stdlib.h","","unsigned long","FAR const char *","FAR char **","int"
