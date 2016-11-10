@@ -46,6 +46,7 @@
  ****************************************************************************/
 
 #include <nuttx/compiler.h>
+#include <locale.h>
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -226,6 +227,11 @@ static inline int isdigit(int c)
 #else
 #  define isdigit(c)   ((c) >= '0' && (c) <= '9')
 #endif
+
+static inline int isdigit_l(int c, locale_t loc)
+{
+  return isdigit(c);
+}
 
 /****************************************************************************
  * Name: isalnum
