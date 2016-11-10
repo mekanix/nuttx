@@ -200,8 +200,6 @@ float     strtof_l(FAR const char *str, FAR char **endptr, locale_t loc);
 #ifdef CONFIG_HAVE_DOUBLE
 double    strtod(FAR const char *str, FAR char **endptr);
 double    strtod_l(FAR const char *str, FAR char **endptr, locale_t loc);
-#endif
-#ifdef CONFIG_HAVE_LONG_DOUBLE
 long double strtold(FAR const char *str, FAR char **endptr);
 #endif
 
