@@ -290,6 +290,11 @@ static inline int isxdigit(int c)
      ((c) >= 'A' && (c) <= 'F'))
 #endif
 
+static inline int isxdigit_l(int c, locale_t loc)
+{
+  return isxdigit(c);
+}
+
 /****************************************************************************
  * Name: toupper
  *
