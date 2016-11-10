@@ -80,6 +80,20 @@
 #endif /* !MB_CUR_MAX_L */
 #endif /* MB_CUR_MAX */
 
+typedef void* locale_t;
+static locale_t locale = (locale_t) 0;
+
+void init_locale()
+{
+  return;
+}
+
+static inline
+locale_t uselocale(locale_t newloc)
+{
+  return (locale_t)0;
+}
+
 /****************************************************************************
  * Public Type Definitions
  ****************************************************************************/
