@@ -166,6 +166,8 @@
 "strspn","string.h","","size_t","FAR const char *","FAR const char *"
 "strstr","string.h","","FAR char","FAR const char *","FAR const char *"
 "strtod","stdlib.h","","double_t","FAR const char *str","FAR char **endptr"
+"strtof","stdlib.h","","double_t","FAR const char *str","FAR char **endptr"
+"strtof_l","stdlib.h","","double_t","FAR const char *str","FAR char **endptr", "locale_t loc"
 "strtok","string.h","","FAR char","FAR char *","FAR const char *"
 "strtok_r","string.h","","FAR char","FAR char *","FAR const char *","FAR char **"
 "strtol","string.h","","long","FAR const char *","FAR char **","int"
