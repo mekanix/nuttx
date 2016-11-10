@@ -41,6 +41,7 @@
 //***************************************************************************
 
 #include <wchar.h>
+#include <stdlib.h>
 
 //***************************************************************************
 // Namespace
@@ -53,6 +54,10 @@ namespace std
 #endif
   using ::wint_t;
   using ::size_t;
+#if defined(CONFIG_LIBC_WCHAR)
+  using ::mbtowc;
+  using ::wctomb;
+#endif
 };
 
 #endif // __INCLUDE_CXX_CWCHAR
