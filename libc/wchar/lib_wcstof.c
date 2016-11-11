@@ -1,5 +1,5 @@
 /****************************************************************************
- * libc/wchar/lib_wcstoll.c
+ * libc/wchar/lib_wcstof.c
  *
  *   Copyright (c)1999 Citrus Project,
  *   All rights reserved.
@@ -49,13 +49,13 @@
  * Name: wcslen
  *
  * Description:
- *   The wcstoll() function is the wide-character equivalent of the strtoll()
+ *   The wcstof() function is the wide-character equivalent of the strtof()
  *   function. It converts a wchar string to long long value.
  *
  ****************************************************************************/
 
-long long int wcstoll(FAR const wchar_t *nptr, FAR wchar_t **endptr, int base)
+float wcstof(FAR const wchar_t *nptr, FAR wchar_t **endptr)
 {
-  return strtoll((const char *)nptr, (char **)endptr, base);
+  return strtof((const char *)nptr, (char **)endptr);
 }
 #endif
