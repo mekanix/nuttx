@@ -55,6 +55,7 @@ namespace std
   using ::wint_t;
   using ::size_t;
 #if defined(CONFIG_LIBC_WCHAR)
+  using ::swprintf;
   using ::mbtowc;
   using ::wctomb;
   using ::wcstod;
