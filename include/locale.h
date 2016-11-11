@@ -83,10 +83,10 @@
 
 static locale_t locale = (locale_t) 0;
 
-void init_locale()
+/*void init_locale()
 {
   return;
-}
+}*/
 
 #ifdef __cplusplus
 static inline
