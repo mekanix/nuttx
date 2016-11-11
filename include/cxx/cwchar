@@ -57,6 +57,7 @@ namespace std
 #if defined(CONFIG_LIBC_WCHAR)
   using ::mbtowc;
   using ::wctomb;
+  using ::wcstol;
   using ::wcstoll;
 #endif
 };
