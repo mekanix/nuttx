@@ -71,6 +71,7 @@ extern "C"
 FAR char  *strdup(FAR const char *s);
 FAR char  *strndup(FAR const char *s, size_t size);
 FAR const char *strerror(int);
+int        strerror_r(int, char *, size_t);
 size_t     strlen(FAR const char *);
 size_t     strnlen(FAR const char *, size_t);
 FAR char  *strcat(FAR char *, FAR const char *);
