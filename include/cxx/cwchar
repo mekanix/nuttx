@@ -58,6 +58,7 @@ namespace std
   using ::mbtowc;
   using ::wctomb;
   using ::wcstol;
+  using ::wcstoul;
   using ::wcstoll;
 #endif
 };
