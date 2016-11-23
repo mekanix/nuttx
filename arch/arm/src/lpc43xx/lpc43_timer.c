@@ -399,6 +399,7 @@ static int lpc43_start(FAR struct timer_lowerhalf_s *lower)
 {
   FAR struct lpc43_lowerhalf_s *priv = (FAR struct lpc43_lowerhalf_s *)lower;
   uint32_t presc_val;
+  uint32_t regval;
 
   tmrinfo("Entry\n");
   DEBUGASSERT(priv);
@@ -422,22 +423,27 @@ static int lpc43_start(FAR struct timer_lowerhalf_s *lower)
 
   /* Set prescaler to increase TC each 1 us */
 
-  presc_val = TMR_FCLK / 1000000;
+  presc_val = TMR_FCLK / 1000000 / 8;
   lpc43_putreg(presc_val - 1, priv->base + LPC43_TMR_PR_OFFSET);
 
   /* Set MR0 with a large enough initial value */
 
-  lpc43_putreg(10000000, priv->base + LPC43_TMR_MR0_OFFSET);
+  lpc43_putreg(1000000, priv->base + LPC43_TMR_MR0_OFFSET);
+
+  lpc43_putreg(0, priv->base + LPC43_TMR_CCR_OFFSET); /* do not use capture */
 
   if (priv->handler)
     {
       /* Enable Match on MR0 generate interrupt and auto-restart */
 
-      lpc43_putreg(3, priv->base + LPC43_TMR_MCR_OFFSET);
+      regval = lpc43_getreg(priv->base + LPC43_TMR_MCR_OFFSET);
+      regval |= 3;
+      lpc43_putreg(regval, priv->base + LPC43_TMR_MCR_OFFSET);
     }
 
   /* Enable the timer */
 
+  lpc43_putreg(TMR_TCR_RESET, priv->base + LPC43_TMR_TCR_OFFSET);
   lpc43_putreg(TMR_TCR_EN, priv->base + LPC43_TMR_TCR_OFFSET);
 
   priv->started = true;
