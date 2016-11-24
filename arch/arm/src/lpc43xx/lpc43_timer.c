@@ -165,7 +165,25 @@ struct lpc43_lowerhalf_s
  *        May want to allocate the right number to not be wasteful.
  */
 
-static struct lpc43_lowerhalf_s g_tmrdevs[4];
+static struct lpc43_lowerhalf_s g_tmrdevs[4] =
+{
+  {
+    .ops  = &g_tmrops,
+    .base = LPC43_TIMER0_BASE,
+  },
+  {
+    .ops  = &g_tmrops,
+    .base = LPC43_TIMER1_BASE,
+  },
+  {
+    .ops  = &g_tmrops,
+    .base = LPC43_TIMER2_BASE,
+  },
+  {
+    .ops  = &g_tmrops,
+    .base = LPC43_TIMER3_BASE,
+  }
+};
 
 /****************************************************************************
  * Private Functions
@@ -736,6 +754,8 @@ static int lpc43_setclock(FAR struct timer_lowerhalf_s *lower, uint32_t freq)
   uint64_t freqin;
   int prescaler;
 
+  tmrinfo("Entry");
+
   FAR struct lpc43_lowerhalf_s *priv = (FAR struct lpc43_lowerhalf_s *)lower;
 
   DEBUGASSERT(priv != NULL);
@@ -846,6 +866,8 @@ static void lpc43_enableint(FAR struct timer_lowerhalf_s *lower, int source)
 
   DEBUGASSERT(priv != NULL);
 
+  tmrinfo("Entry");
+
   /* Set MR0 with the timeout value */
 
   lpc43_putreg(priv->timeout, priv->base + LPC43_TMR_MR0_OFFSET);
@@ -885,6 +907,8 @@ static void lpc43_disableint(FAR struct timer_lowerhalf_s *lower, int source)
 
   DEBUGASSERT(priv != NULL);
 
+  tmrinfo("Entry");
+
   /* Disable interrupt */
 
   lpc43_putreg(0, priv->base + LPC43_TMR_MCR_OFFSET);
@@ -911,6 +935,8 @@ static void lpc43_ackint(FAR struct timer_lowerhalf_s *lower, int source)
 
   DEBUGASSERT(priv != NULL);
 
+  tmrinfo("Entry");
+
   /* Cleared the interrupts */
 
   lpc43_putreg(0x0f, priv->base + LPC43_TMR_IR_OFFSET);
@@ -933,6 +959,8 @@ static void lpc43_ackint(FAR struct timer_lowerhalf_s *lower, int source)
 
 static int lpc43_checkint(FAR struct timer_lowerhalf_s *lower, int source)
 {
+  tmrinfo("Entry");
+
   return 0;
 }
 
@@ -955,6 +983,8 @@ static int      lpc43_setisr(FAR struct timer_lowerhalf_s *lower,
                             int (*handler)(int irq, void *context),
                             int source)
 {
+  tmrinfo("Entry");
+
   return 0;
 }
 
@@ -976,6 +1006,8 @@ static int      lpc43_setisr(FAR struct timer_lowerhalf_s *lower,
 FAR struct lpc43_lowerhalf_s *lpc43_tmr_init(int timer)
 {
   struct timer_lowerhalf_s *dev = NULL;
+
+  tmrinfo("Entry");
 
   /* Get structure and enable power */
 
