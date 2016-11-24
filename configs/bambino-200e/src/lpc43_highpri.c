@@ -79,8 +79,8 @@
 #endif
 
 #ifndef CONFIG_BAMBINO_TMR0_FREQUENCY
-#  warning CONFIG_BAMBINO_TMR0_FREQUENCY defaulting to STM32_APB1_TIM6_CLKIN
-#  define CONFIG_BAMBINO_TMR0_FREQUENCY STM32_APB1_TIM6_CLKIN
+#  warning CONFIG_BAMBINO_TMR0_FREQUENCY defaulting to BOARD_FCLKOUT_FREQUENCY
+#  define CONFIG_BAMBINO_TMR0_FREQUENCY BOARD_FCLKOUT_FREQUENCY
 #endif
 
 #ifndef CONFIG_BAMBINO_TMR0_PERIOD
@@ -118,7 +118,7 @@ static struct highpri_s g_highpri;
  * Name: tmr0_handler
  *
  * Description:
- *   This is the handler for the high speed TIM6 interrupt.
+ *   This is the handler for the high speed TMR0 interrupt.
  *
  ****************************************************************************/
 
@@ -126,6 +126,8 @@ void tmr0_handler(void)
 {
   uint8_t basepri;
   int index;
+
+  tmrinfo("\n\nInterrupt!\n\n");
 
   /* Acknowledge the timer interrupt */
 
@@ -175,7 +177,7 @@ int highpri_main(int argc, char *argv[])
 
   printf("highpri_main: Started\n");
 
-  /* Configure basic timer TIM6 and enable interrupts */
+  /* Configure basic timer TMR0 and enable interrupts */
 
   dev = lpc43_tmr_init(0);
   if (!dev)
@@ -191,7 +193,7 @@ int highpri_main(int argc, char *argv[])
          BOARD_FCLKOUT_FREQUENCY, 1000000, prescaler);
 
   LPC43_TMR_SETPERIOD(dev, CONFIG_BAMBINO_TMR0_PERIOD);
-  printf("TIM6 period=%d cyles; interrupt rate=%d Hz\n",
+  printf("TMR0 period=%d cyles; interrupt rate=%d Hz\n",
          CONFIG_BAMBINO_TMR0_PERIOD,
          CONFIG_BAMBINO_TMR0_FREQUENCY/CONFIG_BAMBINO_TMR0_PERIOD);
 
@@ -213,7 +215,7 @@ int highpri_main(int argc, char *argv[])
       return EXIT_FAILURE;
     }
 
-  /* Enable the timer interrupt at the NVIC and at TIM6 */
+  /* Enable the timer interrupt at the NVIC and at TMR0 */
 
   up_enable_irq(LPC43M4_IRQ_TIMER0);
   LPC43_TMR_ENABLEINT(dev, 0);
