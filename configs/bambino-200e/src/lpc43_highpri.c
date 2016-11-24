@@ -188,7 +188,7 @@ int highpri_main(int argc, char *argv[])
 
   g_highpri.dev = dev;
 
-  prescaler = LPC43_TMR_SETCLOCK(dev, 1000000);
+  prescaler = LPC43_TMR_SETCLOCK(dev, CONFIG_BAMBINO_TMR0_FREQUENCY);
   printf("TIMER0 CLKIN=%d Hz, Frequency=%d Hz, prescaler=%d\n",
          BOARD_FCLKOUT_FREQUENCY, 1000000, prescaler);
 
