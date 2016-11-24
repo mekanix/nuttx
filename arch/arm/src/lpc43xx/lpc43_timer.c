@@ -77,25 +77,6 @@
 /****************************************************************************
  * Private Types
  ****************************************************************************/
-/* This structure provides the private representation of the "lower-half"
- * driver state structure.  This structure must be cast-compatible with the
- * timer_lowerhalf_s structure.
- */
-
-struct lpc43_lowerhalf_s
-{
-  FAR const struct timer_ops_s  *ops;  /* Lower half operations */
-
-  /* Private data */
-
-  uint32_t base;            /* Base address of the timer */
-  tccb_t   handler;         /* Current user interrupt handler */
-  uint32_t timeout;         /* The current timeout value (us) */
-  uint32_t adjustment;      /* time lost due to clock resolution truncation (us) */
-  uint32_t clkticks;        /* actual clock ticks for current interval */
-  bool     started;         /* The timer has been started */
-  uint16_t tmrid;           /* Timer id */
-};
 
 /****************************************************************************
  * Private Function Prototypes
@@ -159,6 +140,26 @@ static const struct timer_ops_s g_tmrops =
 };
 
 /* "Lower half" driver state */
+/* This structure provides the private representation of the "lower-half"
+ * driver state structure.  This structure must be cast-compatible with the
+ * timer_lowerhalf_s structure.
+ */
+
+struct lpc43_lowerhalf_s
+{
+  FAR const struct timer_ops_s  *ops;  /* Lower half operations */
+
+  /* Private data */
+
+  uint32_t base;            /* Base address of the timer */
+  tccb_t   handler;         /* Current user interrupt handler */
+  uint32_t timeout;         /* The current timeout value (us) */
+  uint32_t adjustment;      /* time lost due to clock resolution truncation (us) */
+  uint32_t clkticks;        /* actual clock ticks for current interval */
+  bool     started;         /* The timer has been started */
+  uint16_t tmrid;           /* Timer id */
+};
+
 
 /* TODO - allocating all 6 now, even though we might not need them.
  *        May want to allocate the right number to not be wasteful.
@@ -915,16 +916,103 @@ static void lpc43_ackint(FAR struct timer_lowerhalf_s *lower, int source)
   lpc43_putreg(0x0f, priv->base + LPC43_TMR_IR_OFFSET);
 }
 
+/****************************************************************************
+ * Name: lpc43_checkint
+ *
+ * Description:
+ *   Acknoledge interrupt
+ *
+ * Input Parameters:
+ *   lower - A pointer the publicly visible representation of the "lower-half"
+ *           driver state structure.
+ *
+ * Returned Values:
+ *   Zero on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
 static int lpc43_checkint(FAR struct timer_lowerhalf_s *lower, int source)
 {
   return 0;
 }
+
+/****************************************************************************
+ * Name: lpc43_setisr
+ *
+ * Description:
+ *   Acknoledge interrupt
+ *
+ * Input Parameters:
+ *   lower - A pointer the publicly visible representation of the "lower-half"
+ *           driver state structure.
+ *
+ * Returned Values:
+ *   Zero on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
 
 static int      lpc43_setisr(FAR struct timer_lowerhalf_s *lower,
                             int (*handler)(int irq, void *context),
                             int source)
 {
   return 0;
+}
+
+/****************************************************************************
+ * Name: lpc43_tmr_init
+ *
+ * Description:
+ *   Initialize and return a timer reference
+ *
+ * Input Parameters:
+ *   lower - A pointer the publicly visible representation of the "lower-half"
+ *           driver state structure.
+ *
+ * Returned Values:
+ *   Zero on success; a negated errno value on failure.
+ *
+ ****************************************************************************/
+
+FAR struct lpc43_lowerhalf_s *lpc43_tmr_init(int timer)
+{
+  struct timer_lowerhalf_s *dev = NULL;
+
+  /* Get structure and enable power */
+
+  switch (timer)
+    {
+#ifdef CONFIG_LPC43_TMR0
+      case 0:
+        dev = (struct timer_lowerhalf_s *)&g_tmrdevs[0];
+        break;
+#endif
+#ifdef CONFIG_LPC43_TMR1
+      case 1:
+        dev = (struct timer_lowerhalf_s *)&g_tmrdevs[1];
+        break;
+#endif
+#ifdef CONFIG_LPC43_TMR2
+      case 2:
+        dev = (struct timer_lowerhalf_s *)&g_tmrdevs[2];
+        break;
+#endif
+#ifdef CONFIG_LPC43_TMR3
+      case 3:
+        dev = (struct timer_lowerhalf_s *)&g_tmrdevs[3];
+        break;
+#endif
+      default:
+        return NULL;
+    }
+
+  /* Is device already allocated */
+
+  /*if (((struct timer_lowerhalf_s *)dev)->mode != LPC43_TMR_MODE_UNUSED)
+    {
+      return NULL;
+    }*/
+
+  return dev;
 }
 
 /****************************************************************************

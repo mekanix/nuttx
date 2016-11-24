@@ -42,12 +42,13 @@
  ****************************************************************************/
 
 #include <nuttx/config.h>
+#include <nuttx/timers/timer.h>
 
 #include "chip.h"
 #include "chip/lpc43_timer.h"
 #include "chip/lpc43_ccu.h"
 
-#ifdef CONFIG_TMRER
+#ifdef CONFIG_TIMER
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -56,7 +57,7 @@
 
 #define LPC43_TMR_SETMODE(d,mode)       ((d)->ops->setmode(d,mode))
 #define LPC43_TMR_SETCLOCK(d,freq)      ((d)->ops->setclock(d,freq))
-#define LPC43_TMR_SETPERIOD(d,period)   ((d)->ops->setperiod(d,period))
+#define LPC43_TMR_SETPERIOD(d,period)   ((d)->ops->settimeout(d,period))
 #define LPC43_TMR_GETCOUNTER(d)         ((d)->ops->getcounter(d))
 #define LPC43_TMR_SETCHANNEL(d,ch,mode) ((d)->ops->setchannel(d,ch,mode))
 #define LPC43_TMR_SETCOMPARE(d,ch,comp) ((d)->ops->setcompare(d,ch,comp))
@@ -82,17 +83,19 @@ extern "C"
 #define EXTERN extern
 #endif
 
+struct lpc43_lowerhalf_s;
+
 /************************************************************************************
  * Public Functions
  ************************************************************************************/
 
 /* Power-up timer and get its structure */
 
-FAR struct lpc43_tmr_dev_s *lpc43_tmr_init(int timer);
+FAR struct lpc43_lowerhalf_s *lpc43_tmr_init(int timer);
 
 /* Power-down timer, mark it as unused */
 
-int lpc43_tmr_deinit(FAR struct lpc43_tmr_dev_s * dev);
+int lpc43_tmr_deinit(FAR struct lpc43_lowerhalf_s * dev);
 
 /****************************************************************************
  * Name: lpc43_tmrinitialize
