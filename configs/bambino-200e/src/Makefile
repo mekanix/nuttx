@@ -57,6 +57,10 @@ ifeq ($(CONFIG_ARCH_BUTTONS),y)
 CSRCS += lpc43_buttons.c
 endif
 
+ifeq ($(CONFIG_BAMBINO_HIGHPRI),y)
+CSRCS += lpc43_highpri.c
+endif
+
 ifeq ($(CONFIG_TIMER),y)
 CSRCS += lpc43_timer.c
 endif
