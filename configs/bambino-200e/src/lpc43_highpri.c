@@ -138,20 +138,20 @@ void tmr0_handler(void)
 
   /* Increment the count associated with the current basepri */
 
-  basepri = getbasepri();
+  /*basepri = getbasepri();
   index   = ((basepri >> 4) & 15);
-  g_highpri.basepri[index]++;
+  g_highpri.basepri[index]++;*/
 
   /* Check if we are in an interrupt handle */
 
-  if (up_interrupt_context())
+  //if (up_interrupt_context())
     {
       g_highpri.handler++;
     }
-  else
+  /*else
     {
       g_highpri.thread++;
-    }
+    }*/
 }
 
 /****************************************************************************
