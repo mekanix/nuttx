@@ -92,6 +92,11 @@
 #  error CONFIG_ARCH_IRQPRIO is required
 #endif
 
+/* Redefined here to improve performance */
+
+#define putreg32(v,a)  (*(volatile uint32_t *)(a) = (v))
+#define LPC43_TMR_IR 0x40084000
+
 /****************************************************************************
  * Private Data
  ****************************************************************************/
@@ -127,11 +132,9 @@ void tmr0_handler(void)
   uint8_t basepri;
   int index;
 
-  tmrinfo("\n\nInterrupt!\n\n");
-
   /* Acknowledge the timer interrupt */
 
-  LPC43_TMR_ACKINT(g_highpri.dev, 0);
+  putreg32(0x0f, LPC43_TMR_IR);
 
   /* Increment the count associated with the current basepri */
 
