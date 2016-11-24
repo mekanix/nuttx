@@ -874,7 +874,7 @@ static void lpc43_enableint(FAR struct timer_lowerhalf_s *lower, int source)
 
   lpc43_putreg(0, priv->base + LPC43_TMR_CCR_OFFSET); /* do not use capture */
 
-  if (priv->handler)
+  //if (priv->handler)
     {
       /* Enable Match on MR0 generate interrupt and auto-restart */
 
