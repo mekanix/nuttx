@@ -485,7 +485,7 @@ static int lpc43_start(FAR struct timer_lowerhalf_s *lower)
 
   /* Set prescaler to increase TC each 1 us */
 
-  presc_val = TMR_FCLK / 1000000 / 8;
+  presc_val = TMR_FCLK / 1000000;
   lpc43_putreg(presc_val - 1, priv->base + LPC43_TMR_PR_OFFSET);
 
   /* Set MR0 with a timeout value */
