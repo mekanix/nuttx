@@ -752,7 +752,7 @@ static int lpc43_ioctl(FAR struct timer_lowerhalf_s *lower, int cmd,
 static int lpc43_setclock(FAR struct timer_lowerhalf_s *lower, uint32_t freq)
 {
   uint64_t freqin;
-  int prescaler;
+  uint32_t prescaler;
 
   tmrinfo("Entry");
 
