@@ -94,8 +94,11 @@
 
 /* Redefined here to improve performance */
 
+#define putreg8(v,a)   (*(volatile uint8_t *)(a) = (v))
 #define putreg32(v,a)  (*(volatile uint32_t *)(a) = (v))
-#define LPC43_TMR_IR 0x40084000
+
+#define LPC43_TMR_IR   0x40084000
+#define GPIO_TEST_ADDR 0x400f402a  /* GPIO1_10 address */
 
 /****************************************************************************
  * Private Data
@@ -130,11 +133,16 @@ static struct highpri_s g_highpri;
 void tmr0_handler(void)
 {
   uint8_t basepri;
+  static uint8_t tobit = 0;
   int index;
 
   /* Acknowledge the timer interrupt */
 
   putreg32(0x0f, LPC43_TMR_IR);
+
+  /* togle GPIO1_10 */
+  putreg8(tobit, GPIO_TEST_ADDR);
+  tobit ^= 1;
 
   /* Increment the count associated with the current basepri */
 
@@ -179,6 +187,11 @@ int highpri_main(int argc, char *argv[])
   int i;
 
   printf("highpri_main: Started\n");
+
+  /* Configure pin TEST as GPIOs */
+  
+  lpc43_pin_config(PINCONFIG_TEST);
+  lpc43_gpio_config(GPIO_TEST);
 
   /* Configure basic timer TMR0 and enable interrupts */
 

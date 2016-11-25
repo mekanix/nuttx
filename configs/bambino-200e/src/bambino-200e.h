@@ -51,6 +51,10 @@
  * Pre-processor Definitions
  ****************************************************************************/
 
+/* GPIO Test */
+#define PINCONFIG_TEST PINCONF_GPIO1p10
+#define GPIO_TEST      (GPIO_MODE_OUTPUT | GPIO_VALUE_ONE | GPIO_PORT1 | GPIO_PIN10)
+
 /****************************************************************************
  *   LEDs GPIO                         PIN     SIGNAL NAME
  *  -------------------------------- ------- --------------
