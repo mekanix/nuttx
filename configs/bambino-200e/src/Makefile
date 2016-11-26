@@ -38,6 +38,7 @@
 
 ASRCS =
 CSRCS = lpc43_boot.c
+CXXSRCS = Pin.cxx
 
 ifeq ($(CONFIG_LIB_BOARDCTL),y)
 CSRCS += lpc43_appinit.c
