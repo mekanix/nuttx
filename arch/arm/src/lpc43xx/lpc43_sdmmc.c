@@ -77,10 +77,6 @@
 /* Configuration ************************************************************/
 /* Required system configuration options:
  *
- *   CONFIG_ARCH_DMA - Enable architecture-specific DMA subsystem
- *     initialization.  Required if CONFIG_SDIO_DMA is enabled.
- *   CONFIG_LPC43_GPDMA - Enable LPC43XX GPDMA support.  Required if
- *     CONFIG_SDIO_DMA is enabled
  *   CONFIG_SCHED_WORKQUEUE -- Callback support requires work queue support.
  *
  * Driver-specific configuration options:
@@ -98,10 +94,6 @@
  *     This also requires CONFIG_DEBUG_FS and CONFIG_DEBUG_INFO
  */
 
-#if defined(CONFIG_SDIO_DMA) && !defined(CONFIG_LPC43_GPDMA)
-#  warning "CONFIG_SDIO_DMA support requires CONFIG_LPC43_GPDMA"
-#endif
-
 #ifndef CONFIG_SDIO_DMA
 #  warning "Large Non-DMA transfer may result in RX overrun failures"
 #endif
@@ -110,22 +102,28 @@
 #  error "Callback support requires CONFIG_SCHED_WORKQUEUE"
 #endif
 
-/* Friendly CLKCR bit re-definitions ****************************************/
+/* Clock Division */
 
-/* Mode dependent settings.  These depend on clock devisor settings that must
- * be defined in the board-specific board.h header file: SDCARD_INIT_CLKDIV,
- * SDCARD_MMCXFR_CLKDIV, and SDCARD_SDXFR_CLKDIV.
- */
+#define LPC43_CLKDIV_INIT         255 /* Divide by 510: 204MHz / 510 = 400KHz */
+#define SDCARD_CLOCK_MMCXFR       SDCARD_MMCXFR_CLKDIV
+#define SDCARD_CLOCK_SDWIDEXFR    SDCARD_SDXFR_CLKDIV
+#define SDCARD_CLOCK_SDXFR        SDCARD_SDXFR_CLKDIV
 
-#define LPC43_CLCKCR_INIT         (SDCARD_INIT_CLKDIV | SDCARD_CLOCK_WIDBUS_D1)
-#define SDCARD_CLOCK_MMCXFR       (SDCARD_MMCXFR_CLKDIV | SDCARD_CLOCK_WIDBUS_D1)
-#define SDCARD_CLOCK_SDXFR        (SDCARD_SDXFR_CLKDIV | SDCARD_CLOCK_WIDBUS_D1)
-#define SDCARD_CLOCK_SDWIDEXFR    (SDCARD_SDXFR_CLKDIV | SDCARD_CLOCK_WIDBUS_D4)
+/* Buffer size */
+
+#define SD_FIFO_SZ                32
 
 /* Timing */
 
 #define SDCARD_CMDTIMEOUT         (100000)
 #define SDCARD_LONGTIMEOUT        (0x7fffffff)
+
+/* Type of Card Bus Size */
+
+#define SDCARD_BUS_D1             0
+#define SDCARD_BUS_D4             1
+#define SDCARD_BUS_D8             0x100
+
 
 /* Big DTIMER setting */
 
@@ -137,7 +135,7 @@
  * - 32-bit DMA
  * - Memory increment
  * - Direction (memory-to-peripheral, peripheral-to-memory)
- * - Memory burst size (F4 only)
+ * - Memory burst size
  */
 
 /* DMA control register settings.  All CONTROL register fields need to be
@@ -302,7 +300,10 @@ struct lpc43_sampleregs_s
 
 static void lpc43_takesem(struct lpc43_dev_s *priv);
 #define     lpc43_givesem(priv) (sem_post(&priv->waitsem))
-static inline void lpc43_setclock(uint32_t clkcr);
+static inline void lpc43_setclock(uint32_t clkdiv);
+static inline void lpc43_settype(uint32_t ctype);
+static inline void lpc43_sdcard_clock(bool enable);
+static uint32_t lpc43_ciu_sendcmd(uint32_t cmd, uint32_t arg);
 static void lpc43_configwaitints(struct lpc43_dev_s *priv, uint32_t waitmask,
               sdio_eventset_t waitevents, sdio_eventset_t wkupevents);
 static void lpc43_configxfrints(struct lpc43_dev_s *priv, uint32_t xfrmask);
@@ -507,27 +508,113 @@ static void lpc43_takesem(struct lpc43_dev_s *priv)
  *
  ****************************************************************************/
 
-static inline void lpc43_setclock(uint32_t clkcr)
+static inline void lpc43_setclock(uint32_t clkdiv)
 {
-  uint32_t regval = getreg32(LPC43_SDCARD_CLOCK);
+  /* Use the Divider0 */
 
-  /* Clear CLKDIV, PWRSAV, BYPASS, and WIDBUS bits */
+  putreg32(SDMMC_CLKSRC_CLKDIV0, LPC43_SDMMC_CLKSRC);
 
-  regval &= ~(SDCARD_CLOCK_CLKDIV_MASK | SDCARD_CLOCK_PWRSAV |
-              SDCARD_CLOCK_BYPASS | SDCARD_CLOCK_WIDBUS |
-              SDCARD_CLOCK_CLKEN);
+  /* Inform CIU */
 
-  /* Replace with user provided settings */
+  lpc43_ciu_sendcmd(SDMMC_CMD_UPDCLOCK | SDMMC_CMD_WAITPREV, 0);
 
-  clkcr  &=  (SDCARD_CLOCK_CLKDIV_MASK | SDCARD_CLOCK_PWRSAV |
-              SDCARD_CLOCK_BYPASS | SDCARD_CLOCK_WIDBUS |
-              SDCARD_CLOCK_CLKEN);
+  /* Set Divider0 to desired value */
 
-  regval |=  clkcr;
-  putreg32(regval, LPC43_SDCARD_CLOCK);
+  putreg32(clkdiv & SDMMC_CLKDIV0_MASK, LPC43_SDMMC_CLKDIV);
 
-  mcinfo("CLKCR: %08x PWR: %08x\n",
-         getreg32(LPC43_SDCARD_CLOCK), getreg32(LPC43_SDCARD_PWR));
+  /* Inform CIU */
+
+  lpc43_ciu_sendcmd(SDMMC_CMD_UPDCLOCK | SDMMC_CMD_WAITPREV, 0);
+
+  mcinfo("CLKDIV: %08x\n", getreg32(LPC43_SDMMC_CLKDIV));
+}
+
+/****************************************************************************
+ * Name: lpc43_settype
+ *
+ * Description: Define the Bus Size of SDCard (1, 4 or 8-bit)
+ *   
+ * Input Parameters:
+ *   ctype - A new CTYPE (Card Type Register) value
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static inline void lpc43_settype(uint32_t ctype)
+{
+  putreg32(ctype, LPC43_SDMMC_CTYPE);
+}
+
+/****************************************************************************
+ * Name: lpc43_sdcard_clock
+ *
+ * Description: Enable/Disable the SDCard clock
+ *   
+ * Input Parameters:
+ *   enable - False = clock disabled; True = clock enabled.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+static inline void lpc43_sdcard_clock(bool enable)
+{
+  if (enable)
+    {
+      putreg32(SDMMC_CLKENA_ENABLE, LPC43_SDMMC_CLKENA);
+    }
+  else
+    {
+      putreg32(0, LPC43_SDMMC_CLKENA);
+    }
+}
+
+/****************************************************************************
+ * Name: lpc43_ciu_sendcmd
+ *
+ * Description:
+ *   Function to send command to Card interface unit (CIU)
+ *
+ * Input Parameters:
+ *   cmd - The command to be executed
+ *   arg - The argument to use with the command.
+ *
+ * Returned Value:
+ *   None
+ *
+ ****************************************************************************/
+
+
+int32_t lpc43_ciu_sendcmd(uint32_t cmd, uint32_t arg)
+{
+  volatile int32_t tmo = 50;
+  volatile int delay;
+
+  /* set command arg reg */
+
+  putreg32(arg, LPC43_SDMMC_CMDARG);
+  putreg32(SDMMC_CMD_START | cmd, LPC43_SDMMC_CMD);
+
+  /* poll until command is accepted by the CIU */
+
+  while (--tmo && (getreg32(LPC43_SDMMC_CMD) & MCI_CMD_START))
+    {
+      if (tmo & 1)
+        {
+          delay = 50;
+        }
+      else
+        {
+          delay = 18000;
+        }
+
+        while (--delay > 1);
+    }
+
+    return (tmo < 1) ? 1 : 0;
 }
 
 /****************************************************************************
@@ -1432,21 +1519,21 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
   irqstate_t flags;
   uint32_t regval;
 
-  /* Disable clocking */
-
   flags = enter_critical_section();
 
-  /* Disable the SD Interface */
+  /* Software Reset */
 
-  regval = getreg32(LPC43_SDCARD_CLOCK);
-  regval &= ~SDCARD_CLOCK_CLKEN;
-  putreg32(regval, LPC43_SDCARD_CLOCK);
+  regval = getreg32(LPC43_SDMMC_BMOD);
+  regval |= SDMMC_BMOD_SWR;
+  putreg32(regval, LPC43_SDMMC_BMOD);
 
-  lpc43_setpwrctrl(SDCARD_PWR_CTRL_OFF);
+  /* Reset all blocks */
 
-  /* Put SD card registers in their default, reset state */
+  regval = SDMMC_CTRL_CNTLRRESET | SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET;
+  putreg32(regval, LPC43_SDMMC_CTRL);
 
-  lpc43_default();
+  while ((regval = getreg32(LPC43_SDMMC_CTRL)) &
+         (SDMMC_CTRL_CNTLRRESET | SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET));
 
   /* Reset data */
 
@@ -1467,15 +1554,42 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
 
   /* DMA data transfer support */
 
-  priv->widebus    = false;  /* Required for DMA support */
-#ifdef CONFIG_SDIO_DMA
-  priv->dmamode    = false;  /* true: DMA mode transfer */
-#endif
+  priv->widebus    = true;  /* Required for DMA support */
+  priv->dmamode    = true;  /* true: DMA mode transfer */
 
-  /* Configure and enable the SD card peripheral */
+  /* Use the Internal DMA */
 
-  lpc43_setclock(LPC43_CLCKCR_INIT | SDCARD_CLOCK_CLKEN);
-  lpc43_setpwrctrl(SDCARD_PWR_CTRL_ON);
+  regval = SDMMC_CTRL_INTDMA | SDMMC_CTRL_INTENABLE;
+  putreg32(regval, LPC43_SDMMC_CTRL);
+  putreg32(0, LPC43_SDMMC_INTMASK);
+
+  /* Clear the interrupts for the host controller */
+
+  putreg32(0xFFFFFFFF, LPC43_SDMMC_RINTSTS);
+
+  /* Define MAX Timeout */
+
+  putreg32(0xFFFFFFFF, LPC43_SDMMC_TMOUT);
+
+  /* FIFO threshold settings for DMA, DMA burst of 4, FIFO watermark at 16 */
+
+  regval = SDMMC_FIFOTH_DMABURST_4XFRS;
+  regval |= (((SD_FIFO_SZ / 2) - 1) << SDMMC_FIFOTH_RXWMARK_SHIFT) & SDMMC_FIFOTH_RXWMARK_MASK;
+  regval |= ((SD_FIFO_SZ / 2) << SDMMC_FIFOTH_TXWMARK_SHIFT) & SDMMC_FIFOTH_TXWMARK_MASK;
+  putreg32(regval, LPC43_SDMMC_FIFOTH);
+
+  /* Enable internal DMA, burst size of 4, fixed burst */
+
+  regval  = SDMMC_BMOD_DE;
+  regval |= SDMMC_BMOD_PBL_4XFRS;
+  regval  = ((4) << SDMMC_BMOD_DSL_SHIFT) & SDMMC_BMOD_DSL_MASK;
+  putreg32(regval, LPC43_SDMMC_BMOD);
+
+  /* Disable clock to CIU (needs latch) */
+
+  putreg32(0, LPC43_SDMMC_CLKENA);
+  putreg32(0, LPC43_SDMMC_CLKSRC);
+
   leave_critical_section(flags);
 
   mcinfo("CLCKR: %08x POWER: %08x\n",
@@ -1542,7 +1656,9 @@ static void lpc43_widebus(FAR struct sdio_dev_s *dev, bool wide)
 
 static void lpc43_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
 {
-  uint32_t clkcr;
+  uint8_t clkdiv;
+  uint8_t ctype;
+  bool enabled = false;
 
   switch (rate)
     {
@@ -1550,40 +1666,62 @@ static void lpc43_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
 
       default:
       case CLOCK_SDIO_DISABLED:
-        clkcr = LPC43_CLCKCR_INIT;
+        clkdiv = LPC43_CLKDIV_INIT;
+        ctype  = SDCARD_BUS_D1;
+        enabled = false;
         return;
 
       /* Enable in initial ID mode clocking (<400KHz) */
 
       case CLOCK_IDMODE:
-        clkcr = (LPC43_CLCKCR_INIT | SDCARD_CLOCK_CLKEN);
+        clkdiv = LPC43_CLKDIV_INIT;
+        ctype = SDCARD_BUS_D1;
+        enabled = true;
         break;
 
       /* Enable in MMC normal operation clocking */
 
       case CLOCK_MMC_TRANSFER:
-        clkcr = (SDCARD_CLOCK_MMCXFR | SDCARD_CLOCK_CLKEN);
-        lpc43_setpwrctrl(SDCARD_PWR_OPENDRAIN);
+        clkdiv = SDCARD_CLOCK_MMCXFR;
+        ctype  = SDCARD_BUS_D1;
+        enabled = true;
+        //lpc43_setpwrctrl(SDCARD_PWR_OPENDRAIN);
         break;
 
       /* SD normal operation clocking (wide 4-bit mode) */
 
       case CLOCK_SD_TRANSFER_4BIT:
 #ifndef CONFIG_SDIO_WIDTH_D1_ONLY
-        clkcr = (SDCARD_CLOCK_SDWIDEXFR | SDCARD_CLOCK_CLKEN);
+        clkcr = SDCARD_CLOCK_SDWIDEXFR;
+        ctype  = SDCARD_BUS_D4;
+        enabled = true;
         break;
 #endif
 
       /* SD normal operation clocking (narrow 1-bit mode) */
 
       case CLOCK_SD_TRANSFER_1BIT:
-        clkcr = (SDCARD_CLOCK_SDXFR | SDCARD_CLOCK_CLKEN);
+        clkcr = SDCARD_CLOCK_SDXFR;
+        ctype  = SDCARD_BUS_D1;
+        enabled = true;
         break;
     }
 
-  /* Set the new clock frequency along with the clock enable/disable bit */
+  /* Disable the clock before setting frequency */
 
-  lpc43_setclock(clkcr);
+  lpc43_sdcard_clock(false);
+
+  /* Set the new clock frequency division */
+
+  lpc43_setclock(clkdiv);
+
+  /* Setup the type of card bus wide */
+
+  lpc43_settype(ctype);
+
+  /* Enable/Disable the clock */
+
+  lpc43_sdcard_clock(enabled);
 }
 
 /****************************************************************************
@@ -2699,7 +2837,14 @@ FAR struct sdio_dev_s *sdio_initialize(int slotno)
   regval |= SYSCON_PCONP_PCSDC;
   putreg32(regval, LPC43_SYSCON_PCONP);
 
-  /* Initialize the SD card slot structure */
+  /* Enable clocking to the SDIO block */
+
+  regval  = getreg32(LPC43_CCU1_M4_SDIO_CFG);
+  regval |= CCU_CLK_CFG_RUN;
+  regval |= CCU_CLK_CFG_AUTO;
+  regval |= CCU_CLK_CFG_WAKEUP;
+  putreg32(regval, LPC43_CCU1_M4_SDIO_CFG);
+
   /* Initialize semaphores */
 
   sem_init(&priv->waitsem, 0, 0);
@@ -2716,23 +2861,14 @@ FAR struct sdio_dev_s *sdio_initialize(int slotno)
   DEBUGASSERT(priv->waitwdog);
 
 #ifdef CONFIG_SDIO_DMA
-  /* Configure the SDCARD DMA request */
-
-  lpc43_dmaconfigure(DMA_REQ_SDCARD, DMA_DMASEL_SDCARD);
-
   /* Allocate a DMA channel for SDCARD DMA */
 
   priv->dma = lpc43_dmachannel();
   DEBUGASSERT(priv->dma);
 #endif
 
-  /* Configure GPIOs for 4-bit, wide-bus operation.
-   *
-   * If bus is multiplexed then there is a custom bus configuration utility
-   * in the scope of the board support package.
-   */
+  /* Configure GPIOs for 4-bit, wide-bus operation */
 
-#ifndef CONFIG_SDIO_MUXBUS
   lpc43_configgpio(GPIO_SD_DAT0);
 #ifndef CONFIG_SDIO_WIDTH_D1_ONLY
   lpc43_configgpio(GPIO_SD_DAT1);
