@@ -165,12 +165,14 @@
 
 /* Data transfer interrupt mask bits */
 
-#define SDCARD_RECV_MASK     (SDCARD_MASK0_DCRCFAILIE | SDCARD_MASK0_DTIMEOUTIE | \
-                              SDCARD_MASK0_DATAENDIE | SDCARD_MASK0_RXOVERRIE | \
-                              SDCARD_MASK0_RXFIFOHFIE | SDCARD_MASK0_STBITERRIE)
-#define SDCARD_SEND_MASK     (SDCARD_MASK0_DCRCFAILIE | SDCARD_MASK0_DTIMEOUTIE | \
-                              SDCARD_MASK0_DATAENDIE | SDCARD_MASK0_TXUNDERRIE | \
-                              SDCARD_MASK0_TXFIFOHEIE | SDCARD_MASK0_STBITERRIE)
+#define SDCARD_RECV_MASK     (SDMMC_INT_DCRC | SDMMC_INT_RCRC | SDMMC_INT_DRTO | \
+                              SDMMC_INT_RTO | SDMMC_INT_EBE | SDMMC_INT_RXDR | \
+                              SDMMC_INT_SBE)
+
+#define SDCARD_SEND_MASK     (SDMMC_INT_DCRC | SDMMC_INT_RCRC | SDMMC_INT_DRTO | \
+                              SDMMC_INT_RTO | SDMMC_INT_EBE | SDMMC_INT_TXDR | \
+                              SDMMC_INT_DTO | SDMMC_INT_SBE)
+
 #define SDCARD_DMARECV_MASK  (SDCARD_MASK0_DCRCFAILIE | SDCARD_MASK0_DTIMEOUTIE | \
                               SDCARD_MASK0_DATAENDIE | SDCARD_MASK0_RXOVERRIE | \
                               SDCARD_MASK0_STBITERRIE)
@@ -1561,11 +1563,6 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
 
   regval = SDMMC_CTRL_INTDMA | SDMMC_CTRL_INTENABLE;
   putreg32(regval, LPC43_SDMMC_CTRL);
-  putreg32(0, LPC43_SDMMC_INTMASK);
-
-  /* Clear the interrupts for the host controller */
-
-  putreg32(0xFFFFFFFF, LPC43_SDMMC_RINTSTS);
 
   /* Define MAX Timeout */
 
@@ -1692,7 +1689,7 @@ static void lpc43_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
 
       case CLOCK_SD_TRANSFER_4BIT:
 #ifndef CONFIG_SDIO_WIDTH_D1_ONLY
-        clkcr = SDCARD_CLOCK_SDWIDEXFR;
+        clkdiv = SDCARD_CLOCK_SDWIDEXFR;
         ctype  = SDCARD_BUS_D4;
         enabled = true;
         break;
@@ -1701,7 +1698,7 @@ static void lpc43_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
       /* SD normal operation clocking (narrow 1-bit mode) */
 
       case CLOCK_SD_TRANSFER_1BIT:
-        clkcr = SDCARD_CLOCK_SDXFR;
+        clkdiv = SDCARD_CLOCK_SDXFR;
         ctype  = SDCARD_BUS_D1;
         enabled = true;
         break;
@@ -1744,7 +1741,7 @@ static int lpc43_attach(FAR struct sdio_dev_s *dev)
 
   /* Attach the SD card interrupt handler */
 
-  ret = irq_attach(LPC43_IRQ_MCI, lpc43_interrupt);
+  ret = irq_attach(LPC43M4_IRQ_SDIO, lpc43_interrupt);
   if (ret == OK)
     {
 
@@ -1752,14 +1749,14 @@ static int lpc43_attach(FAR struct sdio_dev_s *dev)
        * interrupt flags
        */
 
-      putreg32(SDCARD_MASK0_RESET,       LPC43_SDCARD_MASK0);
-      putreg32(SDCARD_CLEAR_STATICFLAGS, LPC43_SDCARD_CLEAR);
+      putreg32(SDMMC_INT_RESET, LPC43_SDMMC_INTMASK);
+      putreg32(SDMMC_INT_ALL  , LPC43_SDMMC_RINTSTS);
 
       /* Enable SD card interrupts at the NVIC.  They can now be enabled at
        * the SD card controller as needed.
        */
 
-      up_enable_irq(LPC43_IRQ_MCI);
+      up_enable_irq(LPC43M4_IRQ_SDIO);
     }
 
   return ret;
