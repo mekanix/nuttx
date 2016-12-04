@@ -251,6 +251,7 @@ config LPC43_SCT
 config LPC43_SDMMC
 	bool "SD/MMC"
 	default n
+        select ARCH_HAVE_SDIO
 
 config LPC43_SPI
 	bool "SPI"
@@ -492,6 +493,28 @@ config LPC43_EXTSDRAM3_HEAP
 endif # LCP43_EXTSDRAM3
 
 endmenu # External Memory Configuration
+
+if LPC43_SDMMC
+menu "SDIO Configuration"
+        depends on LPC43_SDMMC
+
+config SDIO_DMA
+        bool "Support DMA data transfers"
+        default y
+        ---help---
+                Support DMA data transfers.
+
+config SDIO_WIDTH_D1_ONLY
+        bool "Use D1 only"
+        default n
+        ---help---
+                Select 1-bit transfer mode.  This may be selected to force the driver
+                operate with only a single data line (the default is to use all
+                4 SD data lines).Default: 4-bit transfer mode.
+
+endmenu
+endif # LPC43_SDMMC
+
 
 if LPC43_ETHERNET
 menu "Ethernet MAC configuration"
