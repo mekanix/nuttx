@@ -47,6 +47,10 @@
 #include <nuttx/board.h>
 
 #include "chip.h"
+#include <nuttx/sdio.h>
+#include <nuttx/mmcsd.h>
+
+#include "lpc43_sdmmc.h"
 
 #ifdef CONFIG_LPC43_SPIFI
 #  include <nuttx/mtd/mtd.h>
@@ -56,6 +60,11 @@
 #    include <sys/mount.h>
 #    include <nuttx/fs/nxffs.h>
 #  endif
+#endif
+
+#if !defined(CONFIG_NSH_MMCSDSLOTNO)
+#  warning "Assuming slot MMC/SD slot 0"
+#  define CONFIG_NSH_MMCSDSLOTNO 0
 #endif
 
 /****************************************************************************
@@ -69,6 +78,12 @@
 #endif
 
 /****************************************************************************
+ * Private Data
+ ****************************************************************************/
+
+static FAR struct sdio_dev_s *g_sdiodev;
+
+/****************************************************************************
  * Private Functions
  ****************************************************************************/
 
@@ -80,6 +95,53 @@
  *   file system.
  *
  ****************************************************************************/
+
+
+/****************************************************************************
+ * Name: nsh_sdinitialize
+ *
+ * Description:
+ *   Initialize SPI-based microSD.
+ *
+ ****************************************************************************/
+
+static int nsh_sdinitialize(void)
+{
+  int ret;
+
+  /* First, get an instance of the SDIO interface */
+
+  g_sdiodev = sdio_initialize(CONFIG_NSH_MMCSDSLOTNO);
+  if (!g_sdiodev)
+    {
+      syslog(LOG_ERR, "ERROR: Failed to initialize SDIO slot %d\n",
+             CONFIG_NSH_MMCSDSLOTNO);
+      return -ENODEV;
+    }
+
+  /* Now bind the SDIO interface to the MMC/SD driver */
+
+  ret = mmcsd_slotinitialize(CONFIG_NSH_MMCSDMINOR, g_sdiodev);
+  if (ret != OK)
+    {
+      syslog(LOG_ERR,
+             "ERROR: Failed to bind SDIO to the MMC/SD driver: %d\n",
+             ret);
+      return ret;
+    }
+
+  /* Check if there is a card in the slot and inform the SDCARD driver.  If
+   * we do not support the card  detect, then let's assume that there is
+   * one.
+   */
+
+#ifdef NSH_HAVE_MMCSD_CD
+  sdio_mediachange(g_sdiodev, !lpc17_gpioread(GPIO_SD_CD));
+#else
+  sdio_mediachange(g_sdiodev, true);
+#endif
+}
+
 
 #ifdef CONFIG_LPC43_SPIFI
 static int nsh_spifi_initialize(void)
@@ -160,6 +222,8 @@ static int nsh_spifi_initialize(void)
 
 int board_app_initialize(uintptr_t arg)
 {
+  nsh_sdinitialize();
+
   /* Initialize the SPIFI block device */
 
   nsh_spifi_initialize();
