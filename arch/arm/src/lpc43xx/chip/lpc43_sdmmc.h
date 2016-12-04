@@ -227,9 +227,12 @@
 /* Command register CMD */
 
 #define SDMMC_CMD_CMDINDEX_SHIFT          (0)       /* Bits 0-5: 5:0 Command index */
-#define SDMMC_CMD_CMDINDEX_MASK           (63 << SDMMC_CMD_CMDINDEX_SHIFT)
-#define SDMMC_CMD_RESPONSE                (1 << 6)  /* Bit 6:  Response expected from card */
-#define SDMMC_CMD_LONGRESP                (1 << 7)  /* Bit 7:  Long response expected from card */
+#define SDMMC_CMD_CMDINDEX_MASK           (0x3f << SDMMC_CMD_CMDINDEX_SHIFT)
+#define SDMMC_CMD_WAITRESP_SHIFT          (6)
+#define SDMMC_CMD_WAITRESP_MASK           (3 << SDMMC_CMD_WAITRESP_SHIFT)
+#  define SDMMC_CMD_NORESPONSE            (0 << SDMMC_CMD_WAITRESP_SHIFT) /* 00/10: No response */
+#  define SDMMC_CMD_SHORTRESPONSE         (1 << SDMMC_CMD_WAITRESP_SHIFT) /* 01: Short response */
+#  define SDMMC_CMD_LONGRESPONSE          (3 << SDMMC_CMD_WAITRESP_SHIFT) /* 11: Long response */
 #define SDMMC_CMD_RESPCRC                 (1 << 8)  /* Bit 8:  Check response CRC */
 #define SDMMC_CMD_DATAXFREXPTD            (1 << 9)  /* Bit 9:  Data transfer expected (read/write) */
 #define SDMMC_CMD_WRITE                   (1 << 10) /* Bit 10: Write to card */
