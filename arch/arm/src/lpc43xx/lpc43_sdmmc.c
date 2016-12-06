@@ -103,7 +103,7 @@
 
 /* Clock Division */
 
-#define LPC43_CLKDIV_INIT         15 /* Divide by 510: 204MHz / 510 = 400KHz */
+#define LPC43_CLKDIV_INIT         6 //15 /* Divide by 510: 204MHz / 510 = 400KHz */
 #define SDCARD_CLOCK_MMCXFR       102 /*SDCARD_MMCXFR_CLKDIV*/
 #define SDCARD_CLOCK_SDWIDEXFR    5   /*SDCARD_SDXFR_CLKDIV*/
 #define SDCARD_CLOCK_SDXFR        102 /*SDCARD_SDXFR_CLKDIV*/
@@ -114,7 +114,7 @@
 
 /* Timing */
 
-#define SDCARD_CMDTIMEOUT         (1000000)
+#define SDCARD_CMDTIMEOUT         (10000)
 #define SDCARD_LONGTIMEOUT        (0x7fffffff)
 
 /* Type of Card Bus Size */
@@ -294,6 +294,16 @@ struct lpc43_sampleregs_s
 /****************************************************************************
  * Private Function Prototypes
  ****************************************************************************/
+
+#ifdef CONFIG_LPC43_SDMMC_REGDEBUG
+static uint32_t lpc43_getreg(uint32_t addr);
+static void lpc43_putreg(uint32_t val, uint32_t addr);
+static void lpc43_checksetup(void);
+#else
+# define lpc43_getreg(addr)      getreg32(addr)
+# define lpc43_putreg(val,addr)  putreg32(val,addr)
+# define lpc43_checksetup()
+#endif
 
 /* Low-level helpers ********************************************************/
 
@@ -514,24 +524,43 @@ static inline void lpc43_setclock(uint32_t clkdiv)
   /* Disable the clock before setting frequency */
 
   lpc43_sdcard_clock(false);
+  mcinfo("Clock Disable -> STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
 
   /* Use the Divider0 */
 
   putreg32(SDMMC_CLKSRC_CLKDIV0, LPC43_SDMMC_CLKSRC);
+  mcinfo("Divider0 -> STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
 
   /* Inform CIU */
 
   lpc43_ciu_sendcmd(SDMMC_CMD_UPDCLOCK | SDMMC_CMD_WAITPREV, 0);
+  mcinfo("Inform CIU -> STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
 
   /* Set Divider0 to desired value */
 
   putreg32(clkdiv & SDMMC_CLKDIV0_MASK, LPC43_SDMMC_CLKDIV);
+  mcinfo("ClkDiv Setup -> STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
 
   /* Inform CIU */
 
   lpc43_ciu_sendcmd(SDMMC_CMD_UPDCLOCK | SDMMC_CMD_WAITPREV, 0);
+  mcinfo("Inform CIU -> STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
+
+  /* Enable the clock */
+
+  lpc43_sdcard_clock(true);
+  mcinfo("Enable Clock -> STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
 
   mcinfo("CLKDIV: %08x\n", getreg32(LPC43_SDMMC_CLKDIV));
+
+  /* Send CMD 0 */
+  lpc43_ciu_sendcmd(0 | SDMMC_CMD_SENDINIT, 0);
+
+  usleep(10);
+
+  /* Print Status */
+
+  mcinfo("Send CMD0 -> STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
 }
 
 /****************************************************************************
@@ -602,7 +631,7 @@ static inline void lpc43_sdcard_clock(bool enable)
 
 static int lpc43_ciu_sendcmd(uint32_t cmd, uint32_t arg)
 {
-  volatile int32_t tmo = 50;
+  volatile int32_t tmo = SDCARD_CMDTIMEOUT;
   volatile int delay;
 
   _info("Entry!\n");
@@ -612,23 +641,13 @@ static int lpc43_ciu_sendcmd(uint32_t cmd, uint32_t arg)
   putreg32(arg, LPC43_SDMMC_CMDARG);
   putreg32(SDMMC_CMD_STARTCMD | cmd, LPC43_SDMMC_CMD);
 
+  _info("cmd = %08x  |  arg = %08x\n", cmd, arg);
+
   /* poll until command is accepted by the CIU */
 
-  while (--tmo && (getreg32(LPC43_SDMMC_CMD) & SDMMC_CMD_STARTCMD))
-    {
-      if (tmo & 1)
-        {
-          delay = 50;
-        }
-      else
-        {
-          delay = 18000;
-        }
+  while (--tmo && (getreg32(LPC43_SDMMC_CMD) & SDMMC_CMD_STARTCMD));
 
-        while (--delay > 1);
-    }
-
-    return (tmo < 1) ? 1 : 0;
+  return (tmo < 1) ? 1 : 0;
 }
 
 /****************************************************************************
@@ -1586,11 +1605,15 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
 
   flags = enter_critical_section();
 
+  mcinfo("STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
+
   /* Software Reset */
 
   regval = getreg32(LPC43_SDMMC_BMOD);
   regval |= SDMMC_BMOD_SWR;
   putreg32(regval, LPC43_SDMMC_BMOD);
+
+  mcinfo("STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
 
   /* Reset all blocks */
 
@@ -1629,6 +1652,14 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
   putreg32(regval, LPC43_SDMMC_CTRL);
 #endif
 
+  /* Disable Interrupts */
+
+  putreg32(0, LPC43_SDMMC_INTMASK);
+
+  /* Clear to Interrupts */
+
+  putreg32(0xFFFFFFFF, LPC43_SDMMC_RINTSTS);
+
   /* Define MAX Timeout */
 
   putreg32(0xFFFFFFFF, LPC43_SDMMC_TMOUT);
@@ -1651,6 +1682,11 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
 
   putreg32(0, LPC43_SDMMC_CLKENA);
   putreg32(0, LPC43_SDMMC_CLKSRC);
+
+  /* Define Initial Bus as 1-bit */
+  putreg32(0, LPC43_SDMMC_CTYPE);
+
+  mcinfo("STATUS = %08x\n", getreg32(LPC43_SDMMC_STATUS));
 
   leave_critical_section(flags);
 
@@ -1735,8 +1771,12 @@ static void lpc43_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
   uint8_t clkdiv;
   uint8_t ctype;
   bool enabled = false;
+  uint32_t regval1;
+  uint32_t regval2;
 
-  _info("Entry!\n");
+  regval1 = getreg32(LPC43_SDMMC_STATUS);
+  regval2 = getreg32(LPC43_SDMMC_RINTSTS);
+  _info("Entry! STATUS = %08x   |  RINTS = %08x\n", regval1, regval2);
 
   switch (rate)
     {
@@ -1785,17 +1825,17 @@ static void lpc43_clock(FAR struct sdio_dev_s *dev, enum sdio_clock_e rate)
         break;
     }
 
-  /* Set the new clock frequency division */
-
-  lpc43_setclock(clkdiv);
-
   /* Setup the type of card bus wide */
 
   lpc43_settype(ctype);
 
+  /* Set the new clock frequency division */
+
+  lpc43_setclock(clkdiv);
+
   /* Enable/Disable the clock */
 
-  lpc43_sdcard_clock(enabled);
+  //lpc43_sdcard_clock(enabled);
 }
 
 /****************************************************************************
@@ -2156,6 +2196,8 @@ static int lpc43_waitresponse(FAR struct sdio_dev_s *dev, uint32_t cmd)
       return -EINVAL;
     }
 
+  events |= SDMMC_INT_RE;
+
   mcinfo("cmd: %08x events: %08x STATUS: %08x RINTSTS: %08x\n",
                cmd, events, getreg32(LPC43_SDMMC_STATUS), getreg32(LPC43_SDMMC_RINTSTS));
 
@@ -2210,8 +2252,6 @@ static int lpc43_recvshortcrc(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t
 
   _info("Entry!\n");
 
-#if 0
-
   /* R1  Command response (48-bit)
    *     47        0               Start bit
    *     46        0               Transmission bit (0=from card)
@@ -2256,17 +2296,18 @@ static int lpc43_recvshortcrc(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t
     {
       /* Check if a timeout or CRC error occurred */
 
-      regval = getreg32(LPC43_SDMMC_STATUS);
+      regval = getreg32(LPC43_SDMMC_RINTSTS);
       if ((regval & SDMMC_INT_RTO) != 0)
         {
           mcerr("ERROR: Command timeout: %08x\n", regval);
           ret = -ETIMEDOUT;
         }
-      else if ((regval & SDCARD_STATUS_CCRCFAIL) != 0)
+      else if ((regval & SDMMC_INT_RCRC) != 0)
         {
           mcerr("ERROR: CRC failure: %08x\n", regval);
           ret = -EIO;
         }
+#if 0
 #ifdef CONFIG_DEBUG_FEATURES
       else
         {
@@ -2280,14 +2321,14 @@ static int lpc43_recvshortcrc(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t
             }
         }
 #endif
+#endif //if 0
     }
 
   /* Clear all pending message completion events and return the R1/R6 response */
 
-  putreg32(SDCARD_RESPDONE_ICR | SDCARD_CMDDONE_ICR, LPC43_SDCARD_CLEAR);
-  *rshort = getreg32(LPC43_SDCARD_RESP0);
-
-#endif // if 0
+  //putreg32(SDCARD_RESPDONE_ICR | SDCARD_CMDDONE_ICR, LPC43_SDCARD_CLEAR);
+  putreg32(0xffffffff, LPC43_SDMMC_RINTSTS);
+  *rshort = getreg32(LPC43_SDMMC_RESP0);
 
   return ret;
 }
@@ -2395,7 +2436,7 @@ static int lpc43_recvshort(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t *r
   putreg32(SDCARD_RESPDONE_ICR | SDCARD_CMDDONE_ICR, LPC43_SDMMC_RINTSTS);
   if (rshort)
     {
-      *rshort = getreg32(LPC43_SDMMC_RESP0);
+      *rshort = 0x1aa; /*getreg32(LPC43_SDMMC_RESP0);*/
     }
 
   return ret;
@@ -2989,14 +3030,6 @@ FAR struct sdio_dev_s *sdio_initialize(int slotno)
 
   struct lpc43_dev_s *priv = &g_scard_dev;
 
-#if 0
-  /* Enable power on SD Interface */
-
-  regval  = getreg32(LPC43_SYSCON_PCONP);
-  regval |= SYSCON_PCONP_PCSDC;
-  putreg32(regval, LPC43_SYSCON_PCONP);
-#endif //if 0
-
   /* Enable clocking to the SDIO block */
 
   regval  = getreg32(LPC43_CCU1_M4_SDIO_CFG);
@@ -3004,6 +3037,8 @@ FAR struct sdio_dev_s *sdio_initialize(int slotno)
   regval |= CCU_CLK_CFG_AUTO;
   regval |= CCU_CLK_CFG_WAKEUP;
   putreg32(regval, LPC43_CCU1_M4_SDIO_CFG);
+
+  while ( (getreg32(LPC43_CCU1_M4_SDIO_STAT) & (CCU_CLK_CFG_RUN | CCU_CLK_CFG_AUTO)) != (CCU_CLK_CFG_RUN | CCU_CLK_CFG_AUTO));
 
   /* Initialize semaphores */
 
