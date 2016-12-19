@@ -64,7 +64,6 @@
 #include "lpc43_cgu.h"
 #include "lpc43_ccu.h"
 #include "lpc43_gpio.h"
-#include "lpc43_gpdma.h"
 #include "lpc43_sdmmc.h"
 
 #include "chip/lpc43_pinconfig.h"
@@ -79,6 +78,12 @@
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#define MCI_DMADES0_OWN         (1UL << 31)
+#define MCI_DMADES0_CH          (1 << 4)
+#define MCI_DMADES0_FS          (1 << 3)
+#define MCI_DMADES0_LD          (1 << 2)
+#define MCI_DMADES0_DIC         (1 << 1)
 
 /* Configuration ************************************************************/
 /* Required system configuration options:
@@ -162,9 +167,12 @@
 
 /* Data transfer interrupt mask bits */
 
+#define SDCARD_RECV_MASK     0xffffffff
+
+/*
 #define SDCARD_RECV_MASK     (SDMMC_INT_DCRC | SDMMC_INT_RCRC | SDMMC_INT_DRTO | \
                               SDMMC_INT_RTO | SDMMC_INT_EBE | SDMMC_INT_RXDR | \
-                              SDMMC_INT_SBE)
+                              SDMMC_INT_SBE) */
 
 #define SDCARD_SEND_MASK     (SDMMC_INT_DCRC | SDMMC_INT_RCRC | SDMMC_INT_DRTO | \
                               SDMMC_INT_RTO | SDMMC_INT_EBE | SDMMC_INT_TXDR | \
@@ -180,7 +188,7 @@
 /* Event waiting interrupt mask bits */
 
 #define SDCARD_INT_ERROR     (SDMMC_INT_RE | SDMMC_INT_RCRC | SDMMC_INT_DCRC | \
-                              SDMMC_INT_RTO | SDMMC_INT_DTO | SDMMC_INT_HTO | \
+                              SDMMC_INT_RTO | SDMMC_INT_DRTO | SDMMC_INT_HTO | \
                               SDMMC_INT_FRUN | SDMMC_INT_HLE | SDMMC_INT_SBE | \
                               SDMMC_INT_EBE)
 
@@ -234,6 +242,15 @@
  * Private Types
  ****************************************************************************/
 
+typedef struct {
+        volatile uint32_t des0;                                         /*!< Control and status */
+        volatile uint32_t des1;                                         /*!< Buffer size(s) */
+        volatile uint32_t des2;                                         /*!< Buffer address pointer 1 */
+        volatile uint32_t des3;                                         /*!< Buffer address pointer 2 */
+} sdmmc_dma_t;
+
+sdmmc_dma_t mci_dma_dd[2];
+
 /* This structure defines the state of the LPC43XX SD card interface */
 
 struct lpc43_dev_s
@@ -269,7 +286,7 @@ struct lpc43_dev_s
 #ifdef CONFIG_SDIO_DMA
   volatile uint8_t   xfrflags;   /* Used to synchronize SD card and DMA completion events */
   bool               dmamode;    /* true: DMA mode transfer */
-  DMA_HANDLE         dma;        /* Handle for DMA channel */
+  //DMA_HANDLE         dma;        /* Handle for DMA channel */
 #endif
 };
 
@@ -343,7 +360,7 @@ static void lpc43_dumpsamples(struct lpc43_dev_s *priv);
 #endif
 
 #ifdef CONFIG_SDIO_DMA
-static void lpc43_dmacallback(DMA_HANDLE handle, void *arg, int status);
+static void lpc43_dmacallback(/*DMA_HANDLE handle,*/ void *arg, int status);
 #endif
 
 /* Data Transfer Helpers ****************************************************/
@@ -662,7 +679,7 @@ static inline void lpc43_setclock(uint32_t clkdiv)
   lpc43_ciu_sendcmd(SDMMC_CMD_UPDCLOCK | SDMMC_CMD_WAITPREV, 0);
 
   //mcinfo("CLKDIV: %08x\n", lpc43_getreg(LPC43_SDMMC_CLKDIV));
-  mcinfo(">>>>>>>>  STATUS: %08x  <<<<<<<<\n", lpc43_getreg(LPC43_SDMMC_STATUS));
+  //mcinfo(">>>>>>>>  STATUS: %08x  <<<<<<<<\n", lpc43_getreg(LPC43_SDMMC_STATUS));
 }
 
 /****************************************************************************
@@ -680,7 +697,7 @@ static inline void lpc43_setclock(uint32_t clkdiv)
 
 static inline void lpc43_settype(uint32_t ctype)
 {
-  //_info("Entry!\n");
+  _info("Entry!\n");
   lpc43_putreg(ctype, LPC43_SDMMC_CTYPE);
 }
 
@@ -734,6 +751,11 @@ static int lpc43_ciu_sendcmd(uint32_t cmd, uint32_t arg)
 
   _info("Entry! cmd = %08x\n", cmd);
 
+  if (cmd == 0x51)
+    {
+      cmd = 0x80002251;
+    }
+
   /* set command arg reg */
 
   lpc43_putreg(arg, LPC43_SDMMC_CMDARG);
@@ -774,7 +796,7 @@ static void lpc43_configwaitints(struct lpc43_dev_s *priv, uint32_t waitmask,
   irqstate_t flags;
   uint32_t regval;
 
-  _info("Entry!\n");
+  _info("Entry!  >>>> WAITMASK = %08x\n", waitmask);
 
   /* Save all of the data and set the new interrupt mask in one, atomic
    * operation.
@@ -788,6 +810,8 @@ static void lpc43_configwaitints(struct lpc43_dev_s *priv, uint32_t waitmask,
   priv->xfrflags   = 0;
 #endif
   lpc43_putreg(priv->xfrmask | priv->waitmask, LPC43_SDMMC_INTMASK);
+  //lpc43_putreg(0xffffffff, LPC43_SDMMC_INTMASK);
+  _info("INTMASK <- %08x\n", priv->xfrmask | priv->waitmask);
   leave_critical_section(flags);
 }
 
@@ -808,7 +832,7 @@ static void lpc43_configwaitints(struct lpc43_dev_s *priv, uint32_t waitmask,
 
 static void lpc43_configxfrints(struct lpc43_dev_s *priv, uint32_t xfrmask)
 {
-  //_info("Entry!\n");
+  _info("Entry!\n");
 
   irqstate_t flags;
   flags = enter_critical_section();
@@ -1030,7 +1054,7 @@ static void lpc43_dumpsamples(struct lpc43_dev_s *priv)
  ****************************************************************************/
 
 #ifdef CONFIG_SDIO_DMA
-static void lpc43_dmacallback(DMA_HANDLE handle, void *arg, int status)
+static void lpc43_dmacallback(/*DMA_HANDLE handle,*/ void *arg, int status)
 {
   FAR struct lpc43_dev_s *priv = (FAR struct lpc43_dev_s *)arg;
 
@@ -1253,24 +1277,38 @@ static void lpc43_sendfifo(struct lpc43_dev_s *priv)
 
 static void lpc43_recvfifo(struct lpc43_dev_s *priv)
 {
-  _info("Entry!\n");
-#if 0
+  uint32_t regval;
+  uint32_t i = 0;
+  uint32_t fifosize;
+
   union
   {
     uint32_t w;
     uint8_t  b[4];
   } data;
 
+  _info("Entry!\n");
+
   /* Loop while there is space to store the data and there is more
    * data available in the RX FIFO.
    */
 
-  while (priv->remaining > 0 &&
-         (lpc43_getreg(LPC43_SDMMC_STATUS) & SDCARD_STATUS_RXDAVL) != 0)
+  fifosize = ((lpc43_getreg(LPC43_SDMMC_STATUS) & SDMMC_STATUS_FIFOCOUNT_MASK) >>
+              SDMMC_STATUS_FIFOCOUNT_SHIFT);
+
+  _info("FIFO = %d\n", fifosize);
+  _info("remaining = %d\n", priv->remaining);
+
+  while (priv->remaining > 0 && i < fifosize)
     {
       /* Read the next word from the RX FIFO */
 
-      data.w = lpc43_getreg(LPC43_SDCARD_FIFO);
+      data.w = lpc43_getreg(LPC43_SDMMC_DATA + (4*i));
+
+      _info("\nBUFADDR[%d] = %08x\n", i, data.w);
+
+      i++;
+
       if (priv->remaining >= sizeof(uint32_t))
         {
           /* Transfer the whole word to the user buffer */
@@ -1283,11 +1321,11 @@ static void lpc43_recvfifo(struct lpc43_dev_s *priv)
           /* Transfer any trailing fractional word */
 
           uint8_t *ptr = (uint8_t *)priv->buffer;
-          int i;
+          int j;
 
-          for (i = 0; i < priv->remaining; i++)
+          for (j = 0; j < priv->remaining; j++)
             {
-               *ptr++ = data.b[i];
+               *ptr++ = data.b[j];
             }
 
           /* Now the transfer is finished */
@@ -1295,7 +1333,19 @@ static void lpc43_recvfifo(struct lpc43_dev_s *priv)
           priv->remaining = 0;
         }
     }
-#endif //if 0
+
+  if (priv->remaining != 0)
+    {
+      /* Reset the FIFO */
+      //regval = lpc43_getreg(LPC43_SDMMC_CTRL);
+      //regval |= SDMMC_CTRL_FIFORESET;
+      //lpc43_putreg(regval, LPC43_SDMMC_CTRL);
+
+      //while (lpc43_getreg(LPC43_SDMMC_CTRL) & SDMMC_CTRL_FIFORESET);
+
+      /* Clear Interrupts */
+      lpc43_putreg(SDMMC_INT_DTO | SDMMC_INT_CDONE | SDMMC_INT_EBE | SDMMC_INT_DCRC, LPC43_SDMMC_RINTSTS);
+    }
 }
 
 /****************************************************************************
@@ -1396,14 +1446,14 @@ static void lpc43_endwait(struct lpc43_dev_s *priv, sdio_eventset_t wkupevent)
 static void lpc43_endtransfer(struct lpc43_dev_s *priv, sdio_eventset_t wkupevent)
 {
   _info("Entry!\n");
-#if 0
+
   /* Disable all transfer related interrupts */
 
   lpc43_configxfrints(priv, 0);
 
   /* Clearing pending interrupt status on all transfer related interrupts */
 
-  lpc43_putreg(SDCARD_XFRDONE_ICR, LPC43_SDCARD_CLEAR);
+  lpc43_putreg(SDCARD_XFRDONE_ICR, LPC43_SDMMC_RINTSTS);
 
   /* If this was a DMA transfer, make sure that DMA is stopped */
 
@@ -1419,7 +1469,7 @@ static void lpc43_endtransfer(struct lpc43_dev_s *priv, sdio_eventset_t wkupeven
        * on an error condition).
        */
 
-      lpc43_dmastop(priv->dma);
+      //lpc43_dmastop(priv->dma);
     }
 #endif
 
@@ -1435,7 +1485,6 @@ static void lpc43_endtransfer(struct lpc43_dev_s *priv, sdio_eventset_t wkupeven
 
       lpc43_endwait(priv, wkupevent);
     }
-#endif
 }
 
 /****************************************************************************
@@ -1458,17 +1507,17 @@ static void lpc43_endtransfer(struct lpc43_dev_s *priv, sdio_eventset_t wkupeven
 
 static int lpc43_interrupt(int irq, void *context)
 {
+  struct lpc43_dev_s *priv = &g_scard_dev;
+  uint32_t enabled;
+  uint32_t pending;
+
   int regval1;
   int regval2;
 
   regval1 = lpc43_getreg(LPC43_SDMMC_STATUS);
-  regval1 = lpc43_getreg(LPC43_SDMMC_RINTSTS);
+  regval2 = lpc43_getreg(LPC43_SDMMC_RINTSTS);
 
-  _info("We got an Interrupt! STATUS = %08X RINTSTS = \n", regval1, regval2);
-#if 0
-  struct lpc43_dev_s *priv = &g_scard_dev;
-  uint32_t enabled;
-  uint32_t pending;
+  _info("We got an Interrupt! STATUS = %08X RINTSTS = %08x xfrmask = %08x\n", regval1, regval2, priv->xfrmask);
 
   /* Loop while there are pending interrupts.  Check the SD card status
    * register.  Mask out all bits that don't correspond to enabled
@@ -1477,26 +1526,32 @@ static int lpc43_interrupt(int irq, void *context)
    * bits remaining, then we have work to do here.
    */
 
-  while ((enabled = lpc43_getreg(LPC43_SDMMC_STATUS) & lpc43_getreg(LPC43_SDMMC_INTMASK)) != 0)
+  while ((enabled = lpc43_getreg(LPC43_SDMMC_RINTSTS) & lpc43_getreg(LPC43_SDMMC_INTMASK)) != 0)
     {
       /* Handle in progress, interrupt driven data transfers ****************/
-
       pending  = enabled & priv->xfrmask;
+
+      _info("enabled = %08x\n", enabled);
+      _info("pending = %08x\n", pending);
+
       if (pending != 0)
         {
 #ifdef CONFIG_SDIO_DMA
           if (!priv->dmamode)
 #endif
             {
-              /* Is the RX FIFO half full or more?  Is so then we must be
+              /* Is the RX FIFO reached watermark?  Is so then we must be
                * processing a receive transaction.
               */
 
-              if ((pending & SDCARD_STATUS_RXFIFOHF) != 0)
+              if ((pending & SDMMC_INT_RXDR) != 0)
                 {
                   /* Receive data from the RX FIFO */
 
                   lpc43_recvfifo(priv);
+
+                  /* Indicate it was received */
+                  //lpc43_putreg(SDMMC_INT_RXDR, LPC43_SDMMC_RINTSTS);
                 }
 
               /* Otherwise, Is the transmit FIFO half empty or less?  If so we must
@@ -1504,7 +1559,7 @@ static int lpc43_interrupt(int irq, void *context)
                * both!
                */
 
-              else if ((pending & SDCARD_STATUS_TXFIFOHE) != 0)
+              else if ((pending & SDMMC_STATUS_TXWMARK) != 0)
                 {
                   /* Send data via the TX FIFO */
 
@@ -1514,8 +1569,10 @@ static int lpc43_interrupt(int irq, void *context)
 
           /* Handle data end events */
 
-          if ((pending & SDCARD_STATUS_DATAEND) != 0)
+          if ((pending & SDMMC_INT_TXDR /*DTO*/) != 0) // FIXME: SDCARD_STATUS_DATAEND ???
             {
+              _info("\n Data Transfer Over!!! \n\n");
+              _info("Tranfered bytes = %d!\n\n", lpc43_getreg(LPC43_SDMMC_TBBCNT));
               /* Handle any data remaining the RX FIFO.  If the RX FIFO is
                * less than half full at the end of the transfer, then no
                * half-full interrupt will be received.
@@ -1560,52 +1617,53 @@ static int lpc43_interrupt(int irq, void *context)
 
           /* Handle data block send/receive CRC failure */
 
-          else if ((pending & SDCARD_STATUS_DCRCFAIL) != 0)
+          else if ((pending & SDMMC_INT_DCRC) != 0)
             {
               /* Terminate the transfer with an error */
 
               mcerr("ERROR: Data block CRC failure, remaining: %d\n", priv->remaining);
-              lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
+              lpc43_putreg(SDMMC_INT_DCRC, LPC43_SDMMC_RINTSTS);
+              //lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
             }
 
           /* Handle data timeout error */
 
-          else if ((pending & SDCARD_STATUS_DTIMEOUT) != 0)
+          else if ((pending & SDMMC_INT_DRTO) != 0)
             {
               /* Terminate the transfer with an error */
 
               mcerr("ERROR: Data timeout, remaining: %d\n", priv->remaining);
-              lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_TIMEOUT);
+              //lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_TIMEOUT);
             }
 
           /* Handle RX FIFO overrun error */
 
-          else if ((pending & SDCARD_STATUS_RXOVERR) != 0)
+          else if ((pending & SDMMC_INT_FRUN) != 0)
             {
               /* Terminate the transfer with an error */
 
               mcerr("ERROR: RX FIFO overrun, remaining: %d\n", priv->remaining);
-              lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
+              //lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
             }
 
           /* Handle TX FIFO underrun error */
 
-          else if ((pending & SDCARD_STATUS_TXUNDERR) != 0)
+          else if ((pending & SDMMC_INT_FRUN) != 0)
             {
               /* Terminate the transfer with an error */
 
               mcerr("ERROR: TX FIFO underrun, remaining: %d\n", priv->remaining);
-              lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
+              //lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
             }
 
           /* Handle start bit error */
 
-          else if ((pending & SDCARD_STATUS_STBITERR) != 0)
+          else if ((pending & SDMMC_INT_SBE) != 0)
             {
               /* Terminate the transfer with an error */
 
               mcerr("ERROR: Start bit, remaining: %d\n", priv->remaining);
-              lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
+              //lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE | SDIOWAIT_ERROR);
             }
         }
 
@@ -1616,7 +1674,7 @@ static int lpc43_interrupt(int irq, void *context)
         {
           /* Is this a response completion event? */
 
-          if ((pending & SDCARD_RESPDONE_STA) != 0)
+          if ((pending & SDMMC_INT_DTO) != 0)
             {
               /* Yes.. Is their a thread waiting for response done? */
 
@@ -1624,14 +1682,14 @@ static int lpc43_interrupt(int irq, void *context)
                 {
                   /* Yes.. wake the thread up */
 
-                  lpc43_putreg(SDCARD_RESPDONE_ICR | SDCARD_CMDDONE_ICR, LPC43_SDCARD_CLEAR);
+                  lpc43_putreg(SDCARD_RESPDONE_ICR | SDCARD_CMDDONE_ICR, LPC43_SDMMC_RINTSTS);
                   lpc43_endwait(priv, SDIOWAIT_RESPONSEDONE);
                 }
             }
 
           /* Is this a command completion event? */
 
-          if ((pending & SDCARD_CMDDONE_STA) != 0)
+          if ((pending & SDMMC_INT_CDONE) != 0)
             {
               /* Yes.. Is their a thread waiting for command done? */
 
@@ -1639,13 +1697,12 @@ static int lpc43_interrupt(int irq, void *context)
                 {
                   /* Yes.. wake the thread up */
 
-                  lpc43_putreg(SDCARD_CMDDONE_ICR, LPC43_SDCARD_CLEAR);
+                  lpc43_putreg(SDCARD_CMDDONE_ICR, LPC43_SDMMC_RINTSTS);
                   lpc43_endwait(priv, SDIOWAIT_CMDDONE);
                 }
             }
         }
     }
-#endif //if 0
   return OK;
 }
 
@@ -1735,14 +1792,21 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
 
   /* DMA data transfer support */
 
-  priv->widebus    = false;  /* Required for DMA support */
+  priv->widebus    = true;  /* Required for DMA support */
+
+  regval = 0;
+
 #ifdef CONFIG_SDIO_DMA
   priv->dmamode    = false;  /* true: DMA mode transfer */
-#endif
 
   /* Use the Internal DMA */
 
-  regval = SDMMC_CTRL_INTDMA | SDMMC_CTRL_INTENABLE;
+  regval = SDMMC_CTRL_INTDMA;
+#endif
+
+  /* Enable interrupts */
+
+  regval |= SDMMC_CTRL_INTENABLE;
   lpc43_putreg(regval, LPC43_SDMMC_CTRL);
 
   /* Disable Interrupts */
@@ -1757,20 +1821,25 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
 
   lpc43_putreg(0xffffffff, LPC43_SDMMC_TMOUT);
 
+  regval = 16 | (15 << SDMMC_FIFOTH_RXWMARK_SHIFT);
+  lpc43_putreg(regval, LPC43_SDMMC_FIFOTH);
+
+//#ifdef CONFIG_SDIO_DMA
   /* FIFO threshold settings for DMA, DMA burst of 4, FIFO watermark at 16 */
 
-  regval = SDMMC_FIFOTH_DMABURST_4XFRS;
-  regval |= (((SD_FIFO_SZ / 2) - 1) << SDMMC_FIFOTH_RXWMARK_SHIFT) & SDMMC_FIFOTH_RXWMARK_MASK;
-  regval |= ((SD_FIFO_SZ / 2) << SDMMC_FIFOTH_TXWMARK_SHIFT) & SDMMC_FIFOTH_TXWMARK_MASK;
-  lpc43_putreg(regval, LPC43_SDMMC_FIFOTH);
+  //regval = SDMMC_FIFOTH_DMABURST_4XFRS;
+  //regval |= (((SD_FIFO_SZ / 2) - 1) << SDMMC_FIFOTH_RXWMARK_SHIFT) & SDMMC_FIFOTH_RXWMARK_MASK;
+  //regval |= ((SD_FIFO_SZ / 2) << SDMMC_FIFOTH_TXWMARK_SHIFT) & SDMMC_FIFOTH_TXWMARK_MASK;
+  //lpc43_putreg(regval, LPC43_SDMMC_FIFOTH);
 
   /* Enable internal DMA, burst size of 4, fixed burst */
 
-  /*regval  = SDMMC_BMOD_DE;
-  regval |= SDMMC_BMOD_PBL_4XFRS;
-  regval |= ((4) << SDMMC_BMOD_DSL_SHIFT) & SDMMC_BMOD_DSL_MASK; */
+  //regval  = SDMMC_BMOD_DE;
+  //regval |= SDMMC_BMOD_PBL_4XFRS;
+  //regval |= ((4) << SDMMC_BMOD_DSL_SHIFT) & SDMMC_BMOD_DSL_MASK;
   regval = 0x80;
   lpc43_putreg(regval, LPC43_SDMMC_BMOD);
+//#endif
 
   /* Disable clock to CIU (needs latch) */
 
@@ -2017,8 +2086,9 @@ static int lpc43_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
       regval |= SDMMC_CMD_NORESPONSE;
       break;
 
-    case MMCSD_R1_RESPONSE:
     case MMCSD_R1B_RESPONSE:
+      regval |= SDMMC_CMD_WAITPREV;
+    case MMCSD_R1_RESPONSE:
     case MMCSD_R3_RESPONSE:
     case MMCSD_R4_RESPONSE:
     case MMCSD_R5_RESPONSE:
@@ -2035,6 +2105,7 @@ static int lpc43_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
   /* Set the command index */
 
   cmdidx  = (cmd & MMCSD_CMDIDX_MASK) >> MMCSD_CMDIDX_SHIFT;
+  regval |= cmdidx;
 
   mcinfo("cmd: %08x arg: %08x regval: %08x\n", cmd, arg, regval);
 
@@ -2071,9 +2142,10 @@ static int lpc43_recvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
                            size_t nbytes)
 {
   struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
-  uint32_t dblocksize;
+  uint32_t blocksize, bytecnt;
+  uint32_t regval;
 
-  _info("Entry!\n");
+  _info("Entry!                       |               nbyte = %08x\n", nbytes);
 
   DEBUGASSERT(priv != NULL && buffer != NULL && nbytes > 0);
   DEBUGASSERT(((uint32_t)buffer & 3) == 0);
@@ -2092,18 +2164,20 @@ static int lpc43_recvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
   priv->dmamode   = false;
 #endif
 
-#if 0
+
   /* Then set up the SD card data path */
 
-  dblocksize = lpc43_log2(nbytes) << SDCARD_DCTRL_DBLOCKSIZE_SHIFT;
-  lpc43_dataconfig(SDCARD_DTIMER_DATATIMEOUT, nbytes,
-                   dblocksize | SDCARD_DCTRL_DTDIR);
+  blocksize = 64;
+  bytecnt   = 512;
+
+  lpc43_putreg(blocksize, LPC43_SDMMC_BLKSIZ);
+  lpc43_putreg(bytecnt, LPC43_SDMMC_BYTCNT);
 
   /* And enable interrupts */
 
   lpc43_configxfrints(priv, SDCARD_RECV_MASK);
   lpc43_sample(priv, SAMPLENDX_AFTER_SETUP);
-#endif
+
   return OK;
 }
 
@@ -2130,7 +2204,7 @@ static int lpc43_sendsetup(FAR struct sdio_dev_s *dev, FAR const uint8_t *buffer
                            size_t nbytes)
 {
   struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
-  uint32_t dblocksize;
+  uint32_t blocksize;
 
   _info("Entry!\n");
 
@@ -2154,8 +2228,8 @@ static int lpc43_sendsetup(FAR struct sdio_dev_s *dev, FAR const uint8_t *buffer
 #if 0
   /* Then set up the SD card data path */
 
-  dblocksize = lpc43_log2(nbytes) << SDCARD_DCTRL_DBLOCKSIZE_SHIFT;
-  lpc43_dataconfig(SDCARD_DTIMER_DATATIMEOUT, nbytes, dblocksize);
+  blocksize = lpc43_log2(nbytes) << SDCARD_DCTRL_DBLOCKSIZE_SHIFT;
+  lpc43_dataconfig(SDCARD_DTIMER_DATATIMEOUT, nbytes, blocksize);
 
   /* Enable TX interrupts */
 
@@ -2283,14 +2357,19 @@ static int lpc43_waitresponse(FAR struct sdio_dev_s *dev, uint32_t cmd)
 
   /* Any interrupt error? */
 
-  if (lpc43_getreg(LPC43_SDMMC_RINTSTS) & SDCARD_INT_ERROR)
+  /*if (lpc43_getreg(LPC43_SDMMC_RINTSTS) & SDCARD_INT_ERROR)
     {
       return -ETIMEDOUT;
+    }*/
+
+  if (cmd == 0x451)
+    {
+      events = 0;
     }
 
   /* Then wait for the response (or timeout) */
 
-  while ((lpc43_getreg(LPC43_SDMMC_RINTSTS) & events) == 0)
+  while ((lpc43_getreg(LPC43_SDMMC_RINTSTS) & events) != events)
     {
       if (--timeout <= 0)
         {
@@ -2299,6 +2378,15 @@ static int lpc43_waitresponse(FAR struct sdio_dev_s *dev, uint32_t cmd)
 
           return -ETIMEDOUT;
         }
+    }
+
+  if ((lpc43_getreg(LPC43_SDMMC_STATUS) & SDMMC_STATUS_FIFOCOUNT_MASK) > 0)
+    {
+      _info("\n>>>>> There is data on FIFO!!! %d bytes\n\n", (lpc43_getreg(LPC43_SDMMC_STATUS) & SDMMC_STATUS_FIFOCOUNT_MASK) >> SDMMC_STATUS_FIFOCOUNT_SHIFT);
+      _info("%08x\n", lpc43_getreg(0x40004100));
+      _info("%08x\n", lpc43_getreg(0x40004104));
+      _info("%08x\n", lpc43_getreg(0x40004108));
+      _info("%08x\n\n", lpc43_getreg(0x4000410c));
     }
 
   lpc43_putreg(0xffffffff, LPC43_SDMMC_RINTSTS);
@@ -2469,10 +2557,14 @@ static int lpc43_recvlong(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t rlo
   lpc43_putreg(SDCARD_RESPDONE_ICR | SDCARD_CMDDONE_ICR, LPC43_SDMMC_RINTSTS);
   if (rlong)
     {
-      rlong[0] = lpc43_getreg(LPC43_SDMMC_RESP0);
-      rlong[1] = lpc43_getreg(LPC43_SDMMC_RESP1);
-      rlong[2] = lpc43_getreg(LPC43_SDMMC_RESP2);
-      rlong[3] = lpc43_getreg(LPC43_SDMMC_RESP3);
+      rlong[0] = lpc43_getreg(LPC43_SDMMC_RESP3);
+      rlong[1] = lpc43_getreg(LPC43_SDMMC_RESP2);
+      rlong[2] = lpc43_getreg(LPC43_SDMMC_RESP1);
+      rlong[3] = lpc43_getreg(LPC43_SDMMC_RESP0);
+      _info("rlong[0] = %08x\n", rlong[0]);
+      _info("rlong[1] = %08x\n", rlong[1]);
+      _info("rlong[2] = %08x\n", rlong[2]);
+      _info("rlong[3] = %08x\n", rlong[3]);
     }
 
   return ret;
@@ -2835,11 +2927,11 @@ static int lpc43_dmarecvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
 {
   _info("Entry!\n");
 
-#if 0
   struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
-  uint32_t dblocksize;
+  uint32_t blocksize;
+  uint32_t bytecnt;
   uint32_t regval;
-  int ret = -EINVAL;
+  int ret = OK;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
   DEBUGASSERT(((uint32_t)buffer & 3) == 0);
@@ -2850,8 +2942,8 @@ static int lpc43_dmarecvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
 
   /* Wide bus operation is required for DMA */
 
-  if (priv->widebus)
-    {
+//  if (priv->widebus)
+//    {
       lpc43_sampleinit();
       lpc43_sample(priv, SAMPLENDX_BEFORE_SETUP);
 
@@ -2863,10 +2955,44 @@ static int lpc43_dmarecvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
 
       /* Then set up the SD card data path */
 
-      dblocksize = lpc43_log2(buflen) << SDCARD_DCTRL_DBLOCKSIZE_SHIFT;
-      lpc43_dataconfig(SDCARD_DTIMER_DATATIMEOUT, buflen,
-                       dblocksize | SDCARD_DCTRL_DTDIR);
+  //blocksize = 128;
+  //bytecnt   = 512;
 
+  //lpc43_putreg(blocksize, LPC43_SDMMC_BLKSIZ);
+  //lpc43_putreg(bytecnt, LPC43_SDMMC_BYTCNT);
+
+  /* Reset DMA */
+
+  regval  = lpc43_getreg(LPC43_SDMMC_CTRL);
+  regval |= SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET;
+  lpc43_putreg(regval, LPC43_SDMMC_CTRL);
+  while (lpc43_getreg(LPC43_SDMMC_CTRL) & SDMMC_CTRL_DMARESET);
+
+  /* Setup DMA list */
+
+  mci_dma_dd[0].des0 = 0x8000001c; //MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_DIC;
+  mci_dma_dd[0].des1 = 512;
+  mci_dma_dd[0].des2 = priv->buffer;
+  mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
+    
+  /*mci_dma_dd[1].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_DIC;
+  mci_dma_dd[1].des1 = 128;
+  mci_dma_dd[1].des2 = &buffer + 128;
+  mci_dma_dd[1].des3 = (uint32_t) &mci_dma_dd[2];
+    
+  mci_dma_dd[2].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_DIC;
+  mci_dma_dd[2].des1 = 128;
+  mci_dma_dd[2].des2 = &buffer + 256;
+  mci_dma_dd[2].des3 = (uint32_t) &mci_dma_dd[3];
+    
+  mci_dma_dd[3].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_LD;
+  mci_dma_dd[3].des1 = 128;
+  mci_dma_dd[3].des2 = &buffer + 384;
+  mci_dma_dd[3].des3 = (uint32_t) &mci_dma_dd[4];*/
+    
+  lpc43_putreg((uint32_t) &mci_dma_dd[0], LPC43_SDMMC_DBADDR);
+
+#if 0
       /* Configure the RX DMA */
 
       lpc43_configxfrints(priv, SDCARD_DMARECV_MASK);
@@ -2886,10 +3012,10 @@ static int lpc43_dmarecvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
           lpc43_dmastart(priv->dma, lpc43_dmacallback, priv);
           lpc43_sample(priv, SAMPLENDX_AFTER_SETUP);
         }
-    }
+#endif //if 0
+//    }
 
   return ret;
-#endif //if 0
 }
 #endif
 
@@ -2920,7 +3046,7 @@ static int lpc43_dmasendsetup(FAR struct sdio_dev_s *dev,
 
 #if 0
   struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
-  uint32_t dblocksize;
+  uint32_t blocksize;
   uint32_t regval;
   int ret = -EINVAL;
 
@@ -2946,8 +3072,8 @@ static int lpc43_dmasendsetup(FAR struct sdio_dev_s *dev,
 
       /* Then set up the SD card data path */
 
-      dblocksize = lpc43_log2(buflen) << SDCARD_DCTRL_DBLOCKSIZE_SHIFT;
-      lpc43_dataconfig(SDCARD_DTIMER_DATATIMEOUT, buflen, dblocksize);
+      blocksize = lpc43_log2(buflen) << SDCARD_DCTRL_DBLOCKSIZE_SHIFT;
+      lpc43_dataconfig(SDCARD_DTIMER_DATATIMEOUT, buflen, blocksize);
 
       /* Configure the TX DMA */
 
@@ -3146,8 +3272,8 @@ FAR struct sdio_dev_s *sdio_initialize(int slotno)
 #ifdef CONFIG_SDIO_DMA
   /* Allocate a DMA channel for SDCARD DMA */
 
-  priv->dma = lpc43_dmachannel();
-  DEBUGASSERT(priv->dma);
+  //priv->dma = lpc43_dmachannel();
+  //DEBUGASSERT(priv->dma);
 #endif
 
   /* Configure GPIOs for 4-bit, wide-bus operation */
