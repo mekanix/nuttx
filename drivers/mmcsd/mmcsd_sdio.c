@@ -1397,7 +1397,7 @@ static ssize_t mmcsd_readsingle(FAR struct mmcsd_state_s *priv,
   if (ret != OK)
     {
       ferr("ERROR: CMD17 transfer failed: %d\n", ret);
-      return ret;
+      //return ret;
     }
 
   /* Return value:  One sector read */
@@ -1714,7 +1714,7 @@ static ssize_t mmcsd_writesingle(FAR struct mmcsd_state_s *priv,
       if (ret != OK)
         {
           finfo("SDIO_DMASENDSETUP: error %d\n", ret);
-          return ret;
+          //return ret;
         }
     }
   else
@@ -1877,7 +1877,7 @@ static ssize_t mmcsd_writemultiple(FAR struct mmcsd_state_s *priv,
       if (ret != OK)
         {
           finfo("SDIO_DMASENDSETUP: error %d\n", ret);
-          return ret;
+          //return ret;
         }
     }
   else
@@ -2672,6 +2672,7 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
   SDIO_CLOCK(priv->dev, CLOCK_SD_TRANSFER_1BIT);
   up_udelay(MMCSD_CLK_DELAY);
 
+#if 0
   /* Get the SD card Configuration Register (SCR).  We need this now because
    * that configuration register contains the indication whether or not
    * this card supports wide bus operation.
@@ -2685,6 +2686,9 @@ static int mmcsd_sdinitialize(FAR struct mmcsd_state_s *priv)
     }
 
   mmcsd_decodeSCR(priv, scr);
+#endif
+
+  priv->buswidth = MMCSD_SCR_BUSWIDTH_4BIT;
 
   /* Select width (4-bit) bus operation (if the card supports it) */
 
@@ -3050,7 +3054,7 @@ static int mmcsd_probe(FAR struct mmcsd_state_s *priv)
 
               /* Set up to receive asynchronous, media removal events */
 
-              SDIO_CALLBACKENABLE(priv->dev, SDIOMEDIA_EJECTED);
+              //SDIO_CALLBACKENABLE(priv->dev, SDIOMEDIA_EJECTED);
             }
 
           /* REVISIT: There is a problem here.  If mmcsd_initialize() returns a
