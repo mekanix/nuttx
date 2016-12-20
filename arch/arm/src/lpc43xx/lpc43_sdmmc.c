@@ -751,19 +751,12 @@ static int lpc43_ciu_sendcmd(uint32_t cmd, uint32_t arg)
 
   _info("Entry! cmd = %08x\n", cmd);
 
-  if (cmd == 0x51)
-    {
-      cmd = 0x80002251;
-    }
-
   /* set command arg reg */
 
   lpc43_putreg(arg, LPC43_SDMMC_CMDARG);
   lpc43_putreg(SDMMC_CMD_STARTCMD | cmd, LPC43_SDMMC_CMD);
 
   mcinfo("cmd = %08x  |  arg = %08x\n", SDMMC_CMD_STARTCMD | cmd, arg);
-
-  tmo = SDCARD_CMDTIMEOUT;
 
   /* poll until command is accepted by the CIU */
 
@@ -796,7 +789,7 @@ static void lpc43_configwaitints(struct lpc43_dev_s *priv, uint32_t waitmask,
   irqstate_t flags;
   uint32_t regval;
 
-  _info("Entry!  >>>> WAITMASK = %08x\n", waitmask);
+  _info("Entry!\n");
 
   /* Save all of the data and set the new interrupt mask in one, atomic
    * operation.
@@ -811,7 +804,7 @@ static void lpc43_configwaitints(struct lpc43_dev_s *priv, uint32_t waitmask,
 #endif
   lpc43_putreg(priv->xfrmask | priv->waitmask, LPC43_SDMMC_INTMASK);
   //lpc43_putreg(0xffffffff, LPC43_SDMMC_INTMASK);
-  _info("INTMASK <- %08x\n", priv->xfrmask | priv->waitmask);
+  _info("waitevents = %08x | xfrflags = %08x | INTMASK <- %08x\n", priv->waitmask, priv->xfrmask, priv->xfrmask | priv->waitmask);
   leave_critical_section(flags);
 }
 
@@ -2061,22 +2054,28 @@ static int lpc43_attach(FAR struct sdio_dev_s *dev)
 
 static int lpc43_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
 {
-  uint32_t regval;
+  uint32_t regval = 0;
   uint32_t cmdidx;
 
   //_info("Entry! cmd = %08x  |  arg = %08x\n", cmd, arg);
 
-  /* Clear CMDINDEX, RESPONSE, WAITPREV, and STARTCMD bits */
-
-  regval = lpc43_getreg(LPC43_SDMMC_CMD);
-  regval &= ~(SDMMC_CMD_CMDINDEX_MASK | SDMMC_CMD_WAITRESP_MASK |
-              SDMMC_CMD_WAITPREV | SDMMC_CMD_STARTCMD | SDMMC_CMD_UPDCLOCK |
-              SDMMC_CMD_SENDINIT);
-
   /* The CMD0 needs the SENDINIT CMD */
 
   if (cmd == 0)
-    regval |= SDMMC_CMD_SENDINIT;
+    {
+      regval |= SDMMC_CMD_SENDINIT;
+    }
+
+  /* Is this a Read/Write Transfer Command ? */
+
+  if ((cmd & MMCSD_WRDATAXFR) == MMCSD_WRDATAXFR)
+    {
+      regval |= SDMMC_CMD_WRITE;
+    }
+  else if ((cmd & MMCSD_RDDATAXFR) == MMCSD_RDDATAXFR)
+         {
+           regval |= SDMMC_CMD_DATAXFREXPTD;
+         }
 
   /* Set WAITRESP bits */
 
@@ -2942,8 +2941,8 @@ static int lpc43_dmarecvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
 
   /* Wide bus operation is required for DMA */
 
-//  if (priv->widebus)
-//    {
+  if (priv->widebus)
+    {
       lpc43_sampleinit();
       lpc43_sample(priv, SAMPLENDX_BEFORE_SETUP);
 
@@ -2953,67 +2952,22 @@ static int lpc43_dmarecvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
       priv->remaining = buflen;
       priv->dmamode   = true;
 
-      /* Then set up the SD card data path */
+      /* Reset DMA */
 
-  //blocksize = 128;
-  //bytecnt   = 512;
+      regval  = lpc43_getreg(LPC43_SDMMC_CTRL);
+      regval |= SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET;
+      lpc43_putreg(regval, LPC43_SDMMC_CTRL);
+      while (lpc43_getreg(LPC43_SDMMC_CTRL) & SDMMC_CTRL_DMARESET);
 
-  //lpc43_putreg(blocksize, LPC43_SDMMC_BLKSIZ);
-  //lpc43_putreg(bytecnt, LPC43_SDMMC_BYTCNT);
+      /* Setup DMA list */
 
-  /* Reset DMA */
-
-  regval  = lpc43_getreg(LPC43_SDMMC_CTRL);
-  regval |= SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET;
-  lpc43_putreg(regval, LPC43_SDMMC_CTRL);
-  while (lpc43_getreg(LPC43_SDMMC_CTRL) & SDMMC_CTRL_DMARESET);
-
-  /* Setup DMA list */
-
-  mci_dma_dd[0].des0 = 0x8000001c; //MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_DIC;
-  mci_dma_dd[0].des1 = 512;
-  mci_dma_dd[0].des2 = priv->buffer;
-  mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
+      mci_dma_dd[0].des0 = 0x8000001c; //MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_DIC;
+      mci_dma_dd[0].des1 = 512;
+      mci_dma_dd[0].des2 = priv->buffer;
+      mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
     
-  /*mci_dma_dd[1].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_DIC;
-  mci_dma_dd[1].des1 = 128;
-  mci_dma_dd[1].des2 = &buffer + 128;
-  mci_dma_dd[1].des3 = (uint32_t) &mci_dma_dd[2];
-    
-  mci_dma_dd[2].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_DIC;
-  mci_dma_dd[2].des1 = 128;
-  mci_dma_dd[2].des2 = &buffer + 256;
-  mci_dma_dd[2].des3 = (uint32_t) &mci_dma_dd[3];
-    
-  mci_dma_dd[3].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_LD;
-  mci_dma_dd[3].des1 = 128;
-  mci_dma_dd[3].des2 = &buffer + 384;
-  mci_dma_dd[3].des3 = (uint32_t) &mci_dma_dd[4];*/
-    
-  lpc43_putreg((uint32_t) &mci_dma_dd[0], LPC43_SDMMC_DBADDR);
-
-#if 0
-      /* Configure the RX DMA */
-
-      lpc43_configxfrints(priv, SDCARD_DMARECV_MASK);
-
-      regval  = lpc43_getreg(LPC43_SDCARD_DCTRL);
-      regval |= SDCARD_DCTRL_DMAEN;
-      lpc43_putreg(regval, LPC43_SDCARD_DCTRL);
-
-      ret = lpc43_dmasetup(priv->dma, SDCARD_RXDMA32_CONTROL,
-                           SDCARD_RXDMA32_CONFIG, LPC43_SDCARD_FIFO,
-                           (uint32_t)buffer, (buflen + 3) >> 2);
-      if (ret == OK)
-        {
-          /* Start the DMA */
-
-          lpc43_sample(priv, SAMPLENDX_BEFORE_ENABLE);
-          lpc43_dmastart(priv->dma, lpc43_dmacallback, priv);
-          lpc43_sample(priv, SAMPLENDX_AFTER_SETUP);
-        }
-#endif //if 0
-//    }
+      lpc43_putreg((uint32_t) &mci_dma_dd[0], LPC43_SDMMC_DBADDR);
+    }
 
   return ret;
 }
@@ -3044,11 +2998,10 @@ static int lpc43_dmasendsetup(FAR struct sdio_dev_s *dev,
 {
   _info("Entry!\n");
 
-#if 0
   struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
   uint32_t blocksize;
   uint32_t regval;
-  int ret = -EINVAL;
+  int ret = OK;
 
   DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
   DEBUGASSERT(((uint32_t)buffer & 3) == 0);
@@ -3070,37 +3023,24 @@ static int lpc43_dmasendsetup(FAR struct sdio_dev_s *dev,
       priv->remaining = buflen;
       priv->dmamode   = true;
 
-      /* Then set up the SD card data path */
+      /* Reset DMA */
 
-      blocksize = lpc43_log2(buflen) << SDCARD_DCTRL_DBLOCKSIZE_SHIFT;
-      lpc43_dataconfig(SDCARD_DTIMER_DATATIMEOUT, buflen, blocksize);
+      regval  = lpc43_getreg(LPC43_SDMMC_CTRL);
+      regval |= SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET;
+      lpc43_putreg(regval, LPC43_SDMMC_CTRL);
+      while (lpc43_getreg(LPC43_SDMMC_CTRL) & SDMMC_CTRL_DMARESET);
 
-      /* Configure the TX DMA */
+      /* Setup DMA list */
 
-      ret = lpc43_dmasetup(priv->dma, SDCARD_TXDMA32_CONTROL,
-                           SDCARD_TXDMA32_CONFIG, (uint32_t)buffer,
-                           LPC43_SDCARD_FIFO, (buflen + 3) >> 2);
-      if (ret == OK)
-        {
-          lpc43_sample(priv, SAMPLENDX_BEFORE_ENABLE);
-
-          regval  = lpc43_getreg(LPC43_SDCARD_DCTRL);
-          regval |= SDCARD_DCTRL_DMAEN;
-          lpc43_putreg(regval, LPC43_SDCARD_DCTRL);
-
-          /* Start the DMA */
-
-          lpc43_dmastart(priv->dma, lpc43_dmacallback, priv);
-          lpc43_sample(priv, SAMPLENDX_AFTER_SETUP);
-
-          /* Enable TX interrupts */
-
-          lpc43_configxfrints(priv, SDCARD_DMASEND_MASK);
-        }
+      mci_dma_dd[0].des0 = 0x8000001c; //MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_DIC;
+      mci_dma_dd[0].des1 = 512;
+      mci_dma_dd[0].des2 = priv->buffer;
+      mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
+    
+      lpc43_putreg((uint32_t) &mci_dma_dd[0], LPC43_SDMMC_DBADDR);
     }
 
   return ret;
-#endif //if 0
 }
 #endif
 
