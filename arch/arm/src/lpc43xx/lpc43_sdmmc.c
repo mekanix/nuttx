@@ -430,6 +430,10 @@ static int  lpc43_registercallback(FAR struct sdio_dev_s *dev,
 
 #ifdef CONFIG_SDIO_DMA
 static bool lpc43_dmasupported(FAR struct sdio_dev_s *dev);
+#ifdef CONFIG_SDIO_PREFLIGHT
+static int  lpc43_dmapreflight(FAR struct sdio_dev_s *dev,
+              FAR const uint8_t *buffer, size_t buflen);
+#endif
 static int  lpc43_dmarecvsetup(FAR struct sdio_dev_s *dev,
               FAR uint8_t *buffer, size_t buflen);
 static int  lpc43_dmasendsetup(FAR struct sdio_dev_s *dev,
@@ -578,6 +582,9 @@ struct lpc43_dev_s g_scard_dev =
     .registercallback = lpc43_registercallback,
 #ifdef CONFIG_SDIO_DMA
     .dmasupported     = lpc43_dmasupported,
+#ifdef CONFIG_SDIO_PREFLIGHT
+    .dmapreflight     = lpc43_dmapreflight,
+#endif
     .dmarecvsetup     = lpc43_dmarecvsetup,
     .dmasendsetup     = lpc43_dmasendsetup,
 #endif
@@ -630,14 +637,10 @@ static void lpc43_takesem(struct lpc43_dev_s *priv)
  * Name: lpc43_setclock
  *
  * Description:
- *   Modify oft-changed bits in the CLKCR register.  Only the following bit-
- *   fields are changed:
- *
- *   CLKDIV, PWRSAV, BYPASS, and WIDBUS
+ *   Define the new clock frequency
  *
  * Input Parameters:
- *   clkcr - A new CLKCR setting for the above mentions bits (other bits
- *           are ignored.
+ *   clkdiv - A new division value to generate the needed frequency.
  *
  * Returned Value:
  *   None
@@ -2070,11 +2073,11 @@ static int lpc43_sendcmd(FAR struct sdio_dev_s *dev, uint32_t cmd, uint32_t arg)
 
   if ((cmd & MMCSD_WRDATAXFR) == MMCSD_WRDATAXFR)
     {
-      regval |= SDMMC_CMD_WRITE;
+      regval |= SDMMC_CMD_DATAXFREXPTD | SDMMC_CMD_WRITE | SDMMC_CMD_WAITPREV;
     }
   else if ((cmd & MMCSD_RDDATAXFR) == MMCSD_RDDATAXFR)
          {
-           regval |= SDMMC_CMD_DATAXFREXPTD;
+           regval |= SDMMC_CMD_DATAXFREXPTD | SDMMC_CMD_WAITPREV;
          }
 
   /* Set WAITRESP bits */
@@ -2902,6 +2905,75 @@ static bool lpc43_dmasupported(FAR struct sdio_dev_s *dev)
 #endif
 
 /****************************************************************************
+ * Name: lpc43_dmapreflight
+ *
+ * Description:
+ *   This is a work-around to setup the DMA transfer on LPC43xx. The default
+ * SDIO driver (drivers/mmcsd/mmcsd_sdio.c) calls dmasendsetup() only after
+ * the write commands (CMD24/CMD18), but the LPC43xx needs the DMA registers
+ * configured before the write command.
+ *
+ * Input Parameters:
+ *   dev - An instance of the SD card device interface
+ *
+ * Returned Value:
+ *   true after setup DMA
+ *
+ ****************************************************************************/
+
+#ifdef CONFIG_SDIO_PREFLIGHT
+static int  lpc43_dmapreflight(FAR struct sdio_dev_s *dev,
+              FAR const uint8_t *buffer, size_t buflen)
+{
+  _info("Entry!\n");
+
+  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
+  uint32_t blocksize;
+  uint32_t regval;
+  int ret = OK;
+
+  DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
+  DEBUGASSERT(((uint32_t)buffer & 3) == 0);
+
+  /* Reset the DPSM configuration */
+
+  lpc43_datadisable();
+
+  /* Wide bus operation is required for DMA */
+
+  if (priv->widebus)
+    {
+      lpc43_sampleinit();
+      lpc43_sample(priv, SAMPLENDX_BEFORE_SETUP);
+
+      /* Save the source buffer information for use by the interrupt handler */
+
+      priv->buffer    = (uint32_t *)buffer;
+      priv->remaining = buflen;
+      priv->dmamode   = true;
+
+      /* Reset DMA */
+
+      regval  = lpc43_getreg(LPC43_SDMMC_CTRL);
+      regval |= SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET;
+      lpc43_putreg(regval, LPC43_SDMMC_CTRL);
+      while (lpc43_getreg(LPC43_SDMMC_CTRL) & SDMMC_CTRL_DMARESET);
+
+      /* Setup DMA list */
+
+      mci_dma_dd[0].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_DIC;
+      mci_dma_dd[0].des1 = 512;
+      mci_dma_dd[0].des2 = priv->buffer;
+      mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
+    
+      lpc43_putreg((uint32_t) &mci_dma_dd[0], LPC43_SDMMC_DBADDR);
+    }
+
+  return ret;
+}
+#endif
+
+/****************************************************************************
  * Name: lpc43_dmarecvsetup
  *
  * Description:
@@ -2998,49 +3070,7 @@ static int lpc43_dmasendsetup(FAR struct sdio_dev_s *dev,
 {
   _info("Entry!\n");
 
-  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
-  uint32_t blocksize;
-  uint32_t regval;
-  int ret = OK;
-
-  DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
-  DEBUGASSERT(((uint32_t)buffer & 3) == 0);
-
-  /* Reset the DPSM configuration */
-
-  lpc43_datadisable();
-
-  /* Wide bus operation is required for DMA */
-
-  if (priv->widebus)
-    {
-      lpc43_sampleinit();
-      lpc43_sample(priv, SAMPLENDX_BEFORE_SETUP);
-
-      /* Save the source buffer information for use by the interrupt handler */
-
-      priv->buffer    = (uint32_t *)buffer;
-      priv->remaining = buflen;
-      priv->dmamode   = true;
-
-      /* Reset DMA */
-
-      regval  = lpc43_getreg(LPC43_SDMMC_CTRL);
-      regval |= SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET;
-      lpc43_putreg(regval, LPC43_SDMMC_CTRL);
-      while (lpc43_getreg(LPC43_SDMMC_CTRL) & SDMMC_CTRL_DMARESET);
-
-      /* Setup DMA list */
-
-      mci_dma_dd[0].des0 = 0x8000001c; //MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_DIC;
-      mci_dma_dd[0].des1 = 512;
-      mci_dma_dd[0].des2 = priv->buffer;
-      mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
-    
-      lpc43_putreg((uint32_t) &mci_dma_dd[0], LPC43_SDMMC_DBADDR);
-    }
-
-  return ret;
+  return OK;
 }
 #endif
 
