@@ -502,6 +502,7 @@ menu "SDIO Configuration"
 config SDIO_DMA
         bool "Support DMA data transfers"
         default y
+	select SDIO_SETUP_DMA_BEFORE_WRITE
         ---help---
                 Support DMA data transfers.
 

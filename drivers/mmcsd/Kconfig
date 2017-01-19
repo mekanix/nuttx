@@ -86,6 +86,11 @@ config SDIO_PREFLIGHT
 	bool
 	default n
 
+config SDIO_SETUP_DMA_BEFORE_WRITE
+	bool
+	default n
+	depends on SDIO_DMA
+
 config SDIO_MUXBUS
 	bool "SDIO bus share support"
 	default n

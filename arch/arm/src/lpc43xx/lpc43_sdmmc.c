@@ -201,7 +201,7 @@
 
 #define SDCARD_CMDDONE_MASK  (SDMMC_INT_CDONE)
 #define SDCARD_RESPDONE_MASK (SDMMC_INT_RTO | SDMMC_INT_RCRC | SDMMC_INT_CDONE)
-#define SDCARD_XFRDONE_MASK  (0)
+#define SDCARD_XFRDONE_MASK  (SDMMC_INT_DTO)
 
 
 #define SDCARD_CMDDONE_ICR   (SDMMC_INT_CDONE)
@@ -284,9 +284,7 @@ struct lpc43_dev_s
 
   bool               widebus;    /* Required for DMA support */
 #ifdef CONFIG_SDIO_DMA
-  volatile uint8_t   xfrflags;   /* Used to synchronize SD card and DMA completion events */
   bool               dmamode;    /* true: DMA mode transfer */
-  //DMA_HANDLE         dma;        /* Handle for DMA channel */
 #endif
 };
 
@@ -357,10 +355,6 @@ static void lpc43_dumpsamples(struct lpc43_dev_s *priv);
 #  define   lpc43_sampleinit()
 #  define   lpc43_sample(priv,index)
 #  define   lpc43_dumpsamples(priv)
-#endif
-
-#ifdef CONFIG_SDIO_DMA
-static void lpc43_dmacallback(/*DMA_HANDLE handle,*/ void *arg, int status);
 #endif
 
 /* Data Transfer Helpers ****************************************************/
@@ -802,12 +796,11 @@ static void lpc43_configwaitints(struct lpc43_dev_s *priv, uint32_t waitmask,
   priv->waitevents = waitevents;
   priv->wkupevent  = wkupevent;
   priv->waitmask   = waitmask;
-#ifdef CONFIG_SDIO_DMA
-  priv->xfrflags   = 0;
-#endif
+  priv->xfrmask    = waitmask;
+
   lpc43_putreg(priv->xfrmask | priv->waitmask, LPC43_SDMMC_INTMASK);
-  //lpc43_putreg(0xffffffff, LPC43_SDMMC_INTMASK);
-  _info("waitevents = %08x | xfrflags = %08x | INTMASK <- %08x\n", priv->waitmask, priv->xfrmask, priv->xfrmask | priv->waitmask);
+  lpc43_putreg(0xffffffff, LPC43_SDMMC_INTMASK);
+  _info("waitevents = %08x | INTMASK <- %08x\n", priv->waitmask, priv->xfrmask | priv->waitmask);
   leave_critical_section(flags);
 }
 
@@ -1038,58 +1031,6 @@ static void lpc43_dumpsamples(struct lpc43_dev_s *priv)
       lpc43_dumpsample(priv, &g_sampleregs[SAMPLENDX_DMA_CALLBACK], "DMA Callback");
     }
 #endif
-}
-#endif
-
-/****************************************************************************
- * Name: lpc43_dmacallback
- *
- * Description:
- *   Called when SD card DMA completes
- *
- ****************************************************************************/
-
-#ifdef CONFIG_SDIO_DMA
-static void lpc43_dmacallback(/*DMA_HANDLE handle,*/ void *arg, int status)
-{
-  FAR struct lpc43_dev_s *priv = (FAR struct lpc43_dev_s *)arg;
-
-  _info("Entry!\n");
-
-  DEBUGASSERT(priv->dmamode);
-  sdio_eventset_t result;
-
-  /* In the normal case, SD card appears to handle the End-Of-Transfer interrupt
-   * first with the End-Of-DMA event occurring significantly later.  On
-   * transfer errors, however, the DMA error will occur before the End-of-
-   * Transfer.
-   */
-
-  lpc43_sample((struct lpc43_dev_s *)arg, SAMPLENDX_DMA_CALLBACK);
-
-  /* Get the result of the DMA transfer */
-
-  if (status < 0)
-    {
-      dmaerr("ERROR: DMA error %d, remaining: %d\n", status, priv->remaining);
-      result = SDIOWAIT_ERROR;
-    }
-  else
-    {
-      result = SDIOWAIT_TRANSFERDONE;
-    }
-
-  /* Then terminate the transfer if this completes all of the steps in the
-   * transfer OR if a DMA error occurred.  In the non-error case, we should
-   * already have the SD card transfer done interrupt.  If not, the transfer
-   * will appropriately time out.
-   */
-
-  priv->xfrflags |= SDCARD_DMADONE_FLAG;
-  if (priv->xfrflags == SDCARD_ALLDONE || result == SDIOWAIT_ERROR)
-    {
-      lpc43_endtransfer(priv, result);
-    }
 }
 #endif
 
@@ -1449,7 +1390,8 @@ static void lpc43_endtransfer(struct lpc43_dev_s *priv, sdio_eventset_t wkupeven
 
   /* Clearing pending interrupt status on all transfer related interrupts */
 
-  lpc43_putreg(SDCARD_XFRDONE_ICR, LPC43_SDMMC_RINTSTS);
+  //lpc43_putreg(SDCARD_XFRDONE_ICR, LPC43_SDMMC_RINTSTS);
+  lpc43_putreg(priv->waitmask, LPC43_SDMMC_RINTSTS);
 
   /* If this was a DMA transfer, make sure that DMA is stopped */
 
@@ -1458,7 +1400,7 @@ static void lpc43_endtransfer(struct lpc43_dev_s *priv, sdio_eventset_t wkupeven
     {
       /* DMA debug instrumentation */
 
-      lpc43_sample(priv, SAMPLENDX_END_TRANSFER);
+      //lpc43_sample(priv, SAMPLENDX_END_TRANSFER);
 
       /* Make sure that the DMA is stopped (it will be stopped automatically
        * on normal transfers, but not necessarily when the transfer terminates
@@ -1565,38 +1507,19 @@ static int lpc43_interrupt(int irq, void *context)
 
           /* Handle data end events */
 
-          if ((pending & SDMMC_INT_TXDR /*DTO*/) != 0) // FIXME: SDCARD_STATUS_DATAEND ???
+          if ((pending & SDMMC_INT_DTO) != 0 || (pending & SDMMC_INT_TXDR) != 0)
             {
               _info("\n Data Transfer Over!!! \n\n");
               _info("Tranfered bytes = %d!\n\n", lpc43_getreg(LPC43_SDMMC_TBBCNT));
-              /* Handle any data remaining the RX FIFO.  If the RX FIFO is
-               * less than half full at the end of the transfer, then no
-               * half-full interrupt will be received.
-               */
 
               /* Was this transfer performed in DMA mode? */
 
 #ifdef CONFIG_SDIO_DMA
               if (priv->dmamode)
                 {
-                  /* Yes.. Terminate the transfers only if the DMA has also
-                   * finished.
-                   */
+                  /* Yes.. Terminate the transfers */
 
-                  priv->xfrflags |= SDCARD_XFRDONE_FLAG;
-                  if (priv->xfrflags == SDCARD_ALLDONE)
-                    {
-                      lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
-                    }
-
-                  /* Otherwise, just disable futher transfer interrupts and
-                   * wait for the DMA complete event.
-                   */
-
-                  else
-                    {
-                      lpc43_configxfrints(priv, 0);
-                    }
+                  lpc43_endtransfer(priv, SDIOWAIT_TRANSFERDONE);
                 }
               else
 #endif
@@ -1774,9 +1697,6 @@ static void lpc43_reset(FAR struct sdio_dev_s *dev)
   priv->waitevents = 0;      /* Set of events to be waited for */
   priv->waitmask   = 0;      /* Interrupt enables for event waiting */
   priv->wkupevent  = 0;      /* The event that caused the wakeup */
-#ifdef CONFIG_SDIO_DMA
-  priv->xfrflags   = 0;      /* Used to synchronize SD card and DMA completion events */
-#endif
 
   wd_cancel(priv->waitwdog); /* Cancel any timeouts */
 
@@ -2694,7 +2614,7 @@ static void lpc43_waitenable(FAR struct sdio_dev_s *dev,
   /* Enable event-related interrupts */
 
   //lpc43_putreg(SDCARD_WAITALL_ICR, LPC43_SDMMC_RINTSTS);
-  lpc43_putreg(0xffffffff, LPC43_SDMMC_RINTSTS);
+  //lpc43_putreg(0xffffffff, LPC43_SDMMC_RINTSTS);
   lpc43_configwaitints(priv, waitmask, eventset, 0);
 }
 
@@ -2797,9 +2717,6 @@ static sdio_eventset_t lpc43_eventwait(FAR struct sdio_dev_s *dev,
   /* Disable event-related interrupts */
 
   lpc43_configwaitints(priv, 0, 0, 0);
-#ifdef CONFIG_SDIO_DMA
-  priv->xfrflags   = 0;
-#endif
 
 errout:
   leave_critical_section(flags);
