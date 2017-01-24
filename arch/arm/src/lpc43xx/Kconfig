@@ -252,7 +252,6 @@ config LPC43_SDMMC
 	bool "SD/MMC"
 	default n
         select ARCH_HAVE_SDIO
-        select SDIO_PREFLIGHT
 
 config LPC43_SPI
 	bool "SPI"

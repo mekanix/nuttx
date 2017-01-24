@@ -476,7 +476,7 @@ static uint32_t lpc43_getreg(uint32_t addr)
         {
           if (count == 4)
             {
-              //mcinfo("...\n");
+              mcinfo("...\n");
             }
 
           return val;
@@ -493,7 +493,7 @@ static uint32_t lpc43_getreg(uint32_t addr)
         {
           /* Yes.. then show how many times the value repeated */
 
-          //mcinfo("[repeats %d more times]\n", count-3);
+          mcinfo("[repeats %d more times]\n", count-3);
         }
 
       /* Save the new address, value, and count */
@@ -505,7 +505,7 @@ static uint32_t lpc43_getreg(uint32_t addr)
 
   /* Show the register value read */
 
-  //mcinfo("%08x->%08x\n", addr, val);
+  mcinfo("%08x->%08x\n", addr, val);
   return val;
 }
 #endif
@@ -533,7 +533,7 @@ static void lpc43_putreg(uint32_t val, uint32_t addr)
 {
   /* Show the register value being written */
 
-  //mcinfo("%08x<-%08x\n", addr, val);
+  mcinfo("%08x<-%08x\n", addr, val);
 
   /* Write the value */
 
@@ -799,7 +799,7 @@ static void lpc43_configwaitints(struct lpc43_dev_s *priv, uint32_t waitmask,
   priv->xfrmask    = waitmask;
 
   lpc43_putreg(priv->xfrmask | priv->waitmask, LPC43_SDMMC_INTMASK);
-  lpc43_putreg(0xffffffff, LPC43_SDMMC_INTMASK);
+  //lpc43_putreg(0xffffffff, LPC43_SDMMC_RINTSTS);
   _info("waitevents = %08x | INTMASK <- %08x\n", priv->waitmask, priv->xfrmask | priv->waitmask);
   leave_critical_section(flags);
 }
@@ -1390,7 +1390,6 @@ static void lpc43_endtransfer(struct lpc43_dev_s *priv, sdio_eventset_t wkupeven
 
   /* Clearing pending interrupt status on all transfer related interrupts */
 
-  //lpc43_putreg(SDCARD_XFRDONE_ICR, LPC43_SDMMC_RINTSTS);
   lpc43_putreg(priv->waitmask, LPC43_SDMMC_RINTSTS);
 
   /* If this was a DMA transfer, make sure that DMA is stopped */
@@ -2878,7 +2877,7 @@ static int  lpc43_dmapreflight(FAR struct sdio_dev_s *dev,
 
       /* Setup DMA list */
 
-      mci_dma_dd[0].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_DIC;
+      mci_dma_dd[0].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_LD;
       mci_dma_dd[0].des1 = 512;
       mci_dma_dd[0].des2 = priv->buffer;
       mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
@@ -2950,7 +2949,7 @@ static int lpc43_dmarecvsetup(FAR struct sdio_dev_s *dev, FAR uint8_t *buffer,
 
       /* Setup DMA list */
 
-      mci_dma_dd[0].des0 = 0x8000001c; //MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_DIC;
+      mci_dma_dd[0].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_FS | MCI_DMADES0_LD;
       mci_dma_dd[0].des1 = 512;
       mci_dma_dd[0].des2 = priv->buffer;
       mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
@@ -2987,7 +2986,50 @@ static int lpc43_dmasendsetup(FAR struct sdio_dev_s *dev,
 {
   _info("Entry!\n");
 
-  return OK;
+  struct lpc43_dev_s *priv = (struct lpc43_dev_s *)dev;
+  uint32_t blocksize;
+  uint32_t bytecnt;
+  uint32_t regval;
+  int ret = OK;
+
+  DEBUGASSERT(priv != NULL && buffer != NULL && buflen > 0);
+  DEBUGASSERT(((uint32_t)buffer & 3) == 0);
+
+  /* Reset the DPSM configuration */
+
+  lpc43_datadisable();
+
+  /* Wide bus operation is required for DMA */
+
+  if (priv->widebus)
+    {
+      lpc43_sampleinit();
+      lpc43_sample(priv, SAMPLENDX_BEFORE_SETUP);
+
+      /* Save the destination buffer information for use by the interrupt handler */
+
+      priv->buffer    = (uint32_t *)buffer;
+      priv->remaining = buflen;
+      priv->dmamode   = true;
+
+      /* Reset DMA */
+
+      regval  = lpc43_getreg(LPC43_SDMMC_CTRL);
+      regval |= SDMMC_CTRL_FIFORESET | SDMMC_CTRL_DMARESET;
+      lpc43_putreg(regval, LPC43_SDMMC_CTRL);
+      while (lpc43_getreg(LPC43_SDMMC_CTRL) & SDMMC_CTRL_DMARESET);
+
+      /* Setup DMA list */
+
+      mci_dma_dd[0].des0 = MCI_DMADES0_OWN | MCI_DMADES0_CH | MCI_DMADES0_LD;
+      mci_dma_dd[0].des1 = 512;
+      mci_dma_dd[0].des2 = priv->buffer;
+      mci_dma_dd[0].des3 = (uint32_t) &mci_dma_dd[1];
+    
+      lpc43_putreg((uint32_t) &mci_dma_dd[0], LPC43_SDMMC_DBADDR);
+    }
+
+  return ret;
 }
 #endif
 
