@@ -128,12 +128,12 @@ typedef struct lldiv_s lldiv_t;
 
 /* locale_t type */
 
-typedef void* locale_t;
+typedef struct  _xlocale *locale_t;
 
 
 /* Extern functions needed by locale.h */
-extern ___mb_cur_max(void);
-extern ___mb_cur_max_l(int x);
+extern int ___mb_cur_max(void);
+extern long ___mb_cur_max_l(int x);
 
 /****************************************************************************
  * Public Function Prototypes
